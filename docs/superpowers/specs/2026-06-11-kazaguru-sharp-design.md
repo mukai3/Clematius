@@ -34,7 +34,7 @@
   1. **整数** = 組み込みコマンドID（かざぐるマウス内部のアクション列挙値）。例 `L=1`, `R=2`, `UD=3`, `LR=101`, `DL=112`
   2. **`#1,VK,Shift,Ctrl,Alt,Win`** = ユーザー定義のキー送信。先頭 `1`=種別(キー送信)、以降 VK コードと修飾キーフラグ
 - **`#1,…` フィールドの確証**: `R+WU=#1,9,1,1,0,0`(Ctrl+Shift+Tab) と `R+WD=#1,9,0,1,0,0`(Ctrl+Tab) が Shift 桁のみ差異。VK 値も `87=W`/`9=Tab`/`116=F5`/`36=Home`/`35=End` と全て妥当
-- **アプリ振り分けはアプリ種別フラグ**: `AllowFlagsInIE`/`AllowFlagsInMozilla`/`AllowFlagsInWindow`/`AllowLevelInExplorer`/`BrowserCommandFlags`/`SwitchTabsFlags` 等のビットフラグで、IE / Mozilla / 一般ウィンドウ / Explorer のカテゴリ単位に機能を制御（プロセス名プロファイルではない）
+- **アプリ振り分けはアプリ種別フラグ**: `AllowFlagsInIE`/`AllowFlagsInMozilla`/`AllowFlagsInWindow`/`AllowLevelInExplorer`/`BrowserCommandFlags`/`SwitchTabsFlags` 等のビットフラグで、IE / Mozilla / 一般ウィンドウ / Explorer のカテゴリ単位に機能を制御（プロセス名プロファイルではない）。→ **本プロジェクトでは近代化として「プロセス名/クラス名パターンのプロファイル」を採用**（カテゴリ方式の上位互換）。挙動の厳密一致は求めず、同等機能を再現する方針
 - **判定パラメータの実デフォルト値**: `GestureRange=8`, `GestureTimeout=1000`, `PushHoldTime=500`, `Sensitivity=3`, `Acceleration=3`, `MergeWheelDelta=2`, `WheelResolution=1`
 - **`[MouseAssignment]`**: マウスボタンチョード割り当て（`C+LC_1=202`(Ctrl+左クリック), `RC_5=213`, `RC_3=211`）。v1 スコープ外
 
@@ -82,6 +82,8 @@
 - ホイールによるウィンドウ操作・音量調節
 - タスクバーボタン並べ替え
 - ジェスチャーアクションのうち、キー送信・`WM_APPCOMMAND`・`WM_CLOSE` 以外（アプリ起動・任意のシステム操作・最小化/最大化等のウィンドウ操作）
+- 既存 `Kazaguru.ini` のインポート/移行（新アプリは独自 JSON 設定をゼロから作る。ini は挙動解読の参考資料としてのみ使用）
+- マウスボタンチョード（`[MouseAssignment]`）
 - インストーラー・自動更新（自分用のため不要）
 
 ## 技術方式
