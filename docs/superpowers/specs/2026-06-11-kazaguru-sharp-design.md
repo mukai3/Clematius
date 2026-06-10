@@ -24,10 +24,30 @@
 | 構成 | `Kazaguru.exe`（本体/GUI）, `Kazasub.dll`（補助・設定UI?）, `Kazahook*.dll`（フック本体） | 機能がフック DLL と本体プロセスに分離 |
 | **アクション実行方式** | `Kazaguru.exe`/`Kazahook.dll` が **キー合成系**（`SendInput`, `keybd_event`, `MapVirtualKeyW`）と**ウィンドウメッセージ系**（`SendMessageW`, `PostMessageW`, `SendNotifyMessageW`, `SendMessageTimeoutW`）の両方をインポート。さらに `AttachThreadInput`, `SetForegroundWindow`, `GetGUIThreadInfo`, `RealChildWindowFromPoint`, `RealGetWindowClassW` | アクションは**ハイブリッド**。キー送信だけでなくウィンドウメッセージを直接送る。`SendNotifyMessageW` の存在から、ブラウザの戻る/進む/更新は **`WM_APPCOMMAND`**（`APPCOMMAND_BROWSER_*`）、ウィンドウ「閉じる」は **`WM_CLOSE`** の可能性が高い。タブ閉じ（Ctrl+W）は Win32 メッセージが無いためキー合成で、`AttachThreadInput`+`SetForegroundWindow` で対象ウィンドウへ確実配送している、と読める |
 
+### 設定ファイル形式（実物 `Kazaguru.ini` の解析で確定）
+
+ユーザー提供の実設定ファイルを解析し、以下を確定した。
+
+- **形式**: BOM 無しの **UTF-16LE テキスト INI**（バイナリではない）。先頭 `5b 00 53 00…`、null 比率 0.5。セクションは `[Settings]` / `[Gestures]` / `[MouseAssignment]`
+- **`[Gestures]` のキー**: ストローク方向列の文字列。`L`/`R`/`U`/`D`（左右上下ストローク）の連結（例 `DR`, `UDU`）。`R+WU`/`R+WD` は**右ボタン押下＋ホイール上/下のホイールジェスチャー**
+- **`[Gestures]` の値（アクション）は2形式**:
+  1. **整数** = 組み込みコマンドID（かざぐるマウス内部のアクション列挙値）。例 `L=1`, `R=2`, `UD=3`, `LR=101`, `DL=112`
+  2. **`#1,VK,Shift,Ctrl,Alt,Win`** = ユーザー定義のキー送信。先頭 `1`=種別(キー送信)、以降 VK コードと修飾キーフラグ
+- **`#1,…` フィールドの確証**: `R+WU=#1,9,1,1,0,0`(Ctrl+Shift+Tab) と `R+WD=#1,9,0,1,0,0`(Ctrl+Tab) が Shift 桁のみ差異。VK 値も `87=W`/`9=Tab`/`116=F5`/`36=Home`/`35=End` と全て妥当
+- **アプリ振り分けはアプリ種別フラグ**: `AllowFlagsInIE`/`AllowFlagsInMozilla`/`AllowFlagsInWindow`/`AllowLevelInExplorer`/`BrowserCommandFlags`/`SwitchTabsFlags` 等のビットフラグで、IE / Mozilla / 一般ウィンドウ / Explorer のカテゴリ単位に機能を制御（プロセス名プロファイルではない）
+- **判定パラメータの実デフォルト値**: `GestureRange=8`, `GestureTimeout=1000`, `PushHoldTime=500`, `Sensitivity=3`, `Acceleration=3`, `MergeWheelDelta=2`, `WheelResolution=1`
+- **`[MouseAssignment]`**: マウスボタンチョード割り当て（`C+LC_1=202`(Ctrl+左クリック), `RC_5=213`, `RC_3=211`）。v1 スコープ外
+
+> 重要: この ini は**ユーザー個人設定**であり**工場出荷時デフォルトではない**。組み込みコマンドID（`L=1` 等）の正確な意味と、デフォルトのジェスチャー割り当ては、別途 VM で ini 再生成 or 逆アセンブルで要確認。
+
 ### RE の進め方（実装フェーズで段階実施）
 
 1. **静的解析**: PE インポート/エクスポート、文字列、リソース（設定ダイアログのレイアウト・既定値）、バージョン情報を抽出。設定ファイル/レジストリのフォーマットを特定
-2. **動的解析**: オリジナルを VM 上で実行し、Spy++ / API Monitor で入力→出力の対応を観測。特に **各ジェスチャーアクションが実際に送る機構（`WM_APPCOMMAND` の lParam 値か、`keybd_event`/`SendInput` のキーか、`WM_CLOSE` か）を一意に確定**する。あわせてジェスチャー判定しきい値、スクロール変換の係数・条件を実測
+2. **動的解析**: オリジナルを VM 上で実行し、Spy++ / API Monitor で入力→出力の対応を観測。確定すべき項目:
+   - **組み込みコマンドID の実機構**: `L=1`/`R=2` 等が `WM_APPCOMMAND`（lParam 値）か内部処理か。ID→意味の対応表を作る
+   - **Chromium のアプリ種別判定**: Chrome/Edge が IE / Mozilla / 一般ウィンドウ のどれに分類され、どのフラグが効くか（ウィンドウクラス名で判定している可能性）
+   - **工場出荷時デフォルトのジェスチャー割り当て**: ini を消して初回起動させ再生成して採取
+   - ジェスチャー判定しきい値（`GestureRange` の画素換算）、スクロール変換の係数・条件を実測
 3. **挙動の文書化**: 復元した仕様を本設計書に追記し、再実装の受け入れ基準（オリジナルと同じ入力で同じ出力）とする
 
 ### 移植方針の原則：忠実再現と近代化の線引き
@@ -141,7 +161,7 @@
 ### マウスジェスチャー
 
 1. 右ボタン押下 → GestureEngine が保留状態に入り、右ダウンを一旦飲み込む。押下位置のウィンドウからプロファイルを解決
-2. カーソル移動 → 移動量がしきい値（既定 15px）を超えたら方向をストロークとして記録。確定モードに入り、現在のストロークを画面表示（例 `↓→`）
+2. カーソル移動 → 移動量がしきい値（オリジナルの `GestureRange=8` 相当。画素換算は動的解析で確定）を超えたら方向をストロークとして記録。確定モードに入り、現在のストロークを画面表示（例 `↓→`）
 3. 右ボタン解放:
    - ストロークあり＆一致 → ActionExecutor がアクション種別（キー送信 / `WM_APPCOMMAND` / `WM_CLOSE`）に応じて実行（右クリックは発生させない）。対象ウィンドウは TargetWindowResolver が決定
    - ストロークあり＆一致なし → 何もしない（誤爆防止）
