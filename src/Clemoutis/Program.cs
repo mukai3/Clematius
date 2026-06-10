@@ -2,6 +2,7 @@ using Clemoutis.Actions;
 using Clemoutis.Config;
 using Clemoutis.Gestures;
 using Clemoutis.Hooks;
+using Clemoutis.Scroll;
 using Clemoutis.Tray;
 
 namespace Clemoutis;
@@ -41,6 +42,7 @@ internal sealed class AppContext : ApplicationContext
     private readonly TrayIcon _tray;
     private readonly ConfigStore _configStore;
     private readonly ActiveConfigProvider _configProvider;
+    private readonly ScrollEnhancer _scroll;
     private readonly System.Windows.Forms.Timer _instancePollTimer;
     // FileSystemWatcher のイベントを UI スレッドへ載せるための隠しコントロール
     private readonly Control _marshal = new();
@@ -52,11 +54,12 @@ internal sealed class AppContext : ApplicationContext
         _ = _marshal.Handle; // ハンドルを生成して BeginInvoke 可能にする
         _configStore = new ConfigStore(_marshal);
         _configProvider = new ActiveConfigProvider(_configStore.Current);
-        _configStore.Changed += cfg => _configProvider.Update(cfg);
+        _scroll = new ScrollEnhancer(_modifiers, _configStore.Current.Scroll);
+        _configStore.Changed += OnConfigChanged;
         _configStore.Corrupted += OnConfigCorrupted;
 
         var gesture = new GestureEngine(_configProvider, new ActionExecutor());
-        var router = new InputRouter(_modifiers, gesture);
+        var router = new InputRouter(_modifiers, gesture, _scroll);
         _mouseHook.Handler = router.OnMouse;
         _keyboardHook.Handler = router.OnKeyboard;
         _mouseHook.Install();
@@ -79,6 +82,12 @@ internal sealed class AppContext : ApplicationContext
                 OnOpenSettings();
         };
         _instancePollTimer.Start();
+    }
+
+    private void OnConfigChanged(Clemoutis.Core.Config.ClemoutisConfig cfg)
+    {
+        _configProvider.Update(cfg);
+        _scroll.UpdateSettings(cfg.Scroll);
     }
 
     private void OnConfigCorrupted(string backupPath)

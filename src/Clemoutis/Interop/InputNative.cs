@@ -13,6 +13,8 @@ internal static class InputNative
 
     public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
     public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+    public const uint MOUSEEVENTF_WHEEL = 0x0800;
+    public const uint MOUSEEVENTF_HWHEEL = 0x01000;
 
     // 自分が注入したイベントの目印（フックの dwExtraInfo と照合する）
     public const nuint ClemoutisSignature = 0x0C1E_0001;
@@ -62,6 +64,12 @@ internal static class InputNative
 
     [DllImport("user32.dll")]
     public static extern nint WindowFromPoint(NativeMethods.POINT point);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetClassNameW(nint hWnd, [Out] char[] lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowLongW(nint hWnd, int nIndex);
 
     [DllImport("user32.dll")]
     public static extern nint GetAncestor(nint hwnd, uint gaFlags);
