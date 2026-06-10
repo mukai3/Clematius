@@ -22,11 +22,12 @@
 | UI 要素判定 | 全モジュールが `OLEACC`（MSAA）をインポート、`UIAccessible` シンボルあり | スクロールバー等の **UI 要素識別にアクセシビリティ API を使用** |
 | 32bit 対応 | `Kazawow64.exe`（32bit EXE）+ `Kazahook32.dll`（32bit DLL） | 64bit 本体が 32bit プロセスへフック注入するためのブリッジ |
 | 構成 | `Kazaguru.exe`（本体/GUI）, `Kazasub.dll`（補助・設定UI?）, `Kazahook*.dll`（フック本体） | 機能がフック DLL と本体プロセスに分離 |
+| **アクション実行方式** | `Kazaguru.exe`/`Kazahook.dll` が **キー合成系**（`SendInput`, `keybd_event`, `MapVirtualKeyW`）と**ウィンドウメッセージ系**（`SendMessageW`, `PostMessageW`, `SendNotifyMessageW`, `SendMessageTimeoutW`）の両方をインポート。さらに `AttachThreadInput`, `SetForegroundWindow`, `GetGUIThreadInfo`, `RealChildWindowFromPoint`, `RealGetWindowClassW` | アクションは**ハイブリッド**。キー送信だけでなくウィンドウメッセージを直接送る。`SendNotifyMessageW` の存在から、ブラウザの戻る/進む/更新は **`WM_APPCOMMAND`**（`APPCOMMAND_BROWSER_*`）、ウィンドウ「閉じる」は **`WM_CLOSE`** の可能性が高い。タブ閉じ（Ctrl+W）は Win32 メッセージが無いためキー合成で、`AttachThreadInput`+`SetForegroundWindow` で対象ウィンドウへ確実配送している、と読める |
 
 ### RE の進め方（実装フェーズで段階実施）
 
 1. **静的解析**: PE インポート/エクスポート、文字列、リソース（設定ダイアログのレイアウト・既定値）、バージョン情報を抽出。設定ファイル/レジストリのフォーマットを特定
-2. **動的解析**: オリジナルを VM 上で実行し、API モニタ（フック設置・SendInput・スクロールメッセージ）と入力→出力の対応を観測。ジェスチャー判定しきい値、スクロール変換の係数・条件を実測で確定
+2. **動的解析**: オリジナルを VM 上で実行し、Spy++ / API Monitor で入力→出力の対応を観測。特に **各ジェスチャーアクションが実際に送る機構（`WM_APPCOMMAND` の lParam 値か、`keybd_event`/`SendInput` のキーか、`WM_CLOSE` か）を一意に確定**する。あわせてジェスチャー判定しきい値、スクロール変換の係数・条件を実測
 3. **挙動の文書化**: 復元した仕様を本設計書に追記し、再実装の受け入れ基準（オリジナルと同じ入力で同じ出力）とする
 
 ### 移植方針の原則：忠実再現と近代化の線引き
@@ -40,7 +41,11 @@
 
 1. **マウスジェスチャー**
    - 右ボタンドラッグの軌跡（↑↓←→ ストローク列）でアクション実行
-   - アクションはキーストローク送信のみ（例: `Ctrl+W`, `Alt+Left`）
+   - アクションは**ハイブリッド**（静的解析でオリジナルもハイブリッドと判明）:
+     - キーストローク送信（例: `Ctrl+W`, `Alt+Left`）。対象ウィンドウへ `AttachThreadInput`+`SetForegroundWindow` で確実配送
+     - `WM_APPCOMMAND` 送信（戻る/進む/更新など `APPCOMMAND_BROWSER_*`）
+     - `WM_CLOSE` 送信（ウィンドウを閉じる）
+   - 各アクションが実際にどの機構を使うかは動的解析でオリジナルを実測して確定する
    - アプリごとのプロファイル（プロセス名パターンで適用先を決定、マッチなしはデフォルトプロファイル）
    - プロファイル単位でジェスチャー無効化可（ゲーム・リモートデスクトップ等の除外用）
 2. **スクロール拡張**
@@ -56,7 +61,7 @@
 - スクロール加速
 - ホイールによるウィンドウ操作・音量調節
 - タスクバーボタン並べ替え
-- ジェスチャーアクションのうちキー送信以外（ウィンドウ操作・アプリ起動・システム操作）
+- ジェスチャーアクションのうち、キー送信・`WM_APPCOMMAND`・`WM_CLOSE` 以外（アプリ起動・任意のシステム操作・最小化/最大化等のウィンドウ操作）
 - インストーラー・自動更新（自分用のため不要）
 
 ## 技術方式
@@ -119,7 +124,8 @@
 | InputRouter | カーソル位置のウィンドウ情報（プロセス名・クラス名）を取得し、GestureEngine / ScrollEnhancer に振り分け。イベントを「飲み込む」か「素通し」かの最終判断 |
 | GestureEngine | 右ボタン押下からの軌跡を ↑↓←→ にエンコードし、プロファイルのジェスチャー定義とマッチング。一致したら ActionExecutor に依頼。動かず離したら通常右クリックを再生 |
 | ScrollEnhancer | スクロールバー上の縦ホイール→水平変換、修飾キー押下中のホイール変換 |
-| ActionExecutor | キーストローク文字列（`"Ctrl+W"` 等）をパースして SendInput で送信 |
+| ActionExecutor | アクション定義を解釈し、機構別に実行する。(1) キーストローク: 文字列（`"Ctrl+W"` 等）をパースし、対象ウィンドウへ `AttachThreadInput`+`SetForegroundWindow` で焦点を移したうえ `SendInput` 送信。(2) `WM_APPCOMMAND`: `APPCOMMAND_BROWSER_BACKWARD/FORWARD/REFRESH` 等を `SendMessageW`/`SendNotifyMessageW` で対象へ送信。(3) `WM_CLOSE`: `PostMessageW` で送信。アクション種別はピュアロジックで判定し、Win32 呼び出しは薄いラッパに隔離 |
+| TargetWindowResolver | アクション対象ウィンドウを決定（ジェスチャー開始位置のトップレベル窓 / 前面窓）。`WindowFromPoint`/`GetAncestor`/`GetForegroundWindow` を使用 |
 | ProfileResolver | 前面アプリのプロセス名から適用プロファイルを決定 |
 | ConfigStore | `%APPDATA%\KazaguruSharp\config.json` の読み書き。変更の即時反映（FileSystemWatcher） |
 | TrayIcon / SettingsForm | トレイメニューと WinForms 設定画面 |
@@ -137,7 +143,7 @@
 1. 右ボタン押下 → GestureEngine が保留状態に入り、右ダウンを一旦飲み込む。押下位置のウィンドウからプロファイルを解決
 2. カーソル移動 → 移動量がしきい値（既定 15px）を超えたら方向をストロークとして記録。確定モードに入り、現在のストロークを画面表示（例 `↓→`）
 3. 右ボタン解放:
-   - ストロークあり＆一致 → ActionExecutor がキー送信（右クリックは発生させない）
+   - ストロークあり＆一致 → ActionExecutor がアクション種別（キー送信 / `WM_APPCOMMAND` / `WM_CLOSE`）に応じて実行（右クリックは発生させない）。対象ウィンドウは TargetWindowResolver が決定
    - ストロークあり＆一致なし → 何もしない（誤爆防止）
    - ストロークなし → 飲み込んだ右ダウン＋アップを SendInput で再生し、通常の右クリックを成立させる
 4. ジェスチャー無効プロファイルのアプリでは 1 の時点で素通し
@@ -168,8 +174,11 @@
       "processPattern": "*",
       "gesturesEnabled": true,
       "gestures": [
-        { "strokes": "←", "action": "Alt+Left" },
-        { "strokes": "↓→", "action": "Ctrl+W" }
+        { "strokes": "←",  "action": { "type": "appcommand", "command": "BrowserBackward" } },
+        { "strokes": "→",  "action": { "type": "appcommand", "command": "BrowserForward" } },
+        { "strokes": "↑",  "action": { "type": "appcommand", "command": "BrowserRefresh" } },
+        { "strokes": "↓→", "action": { "type": "key", "keys": "Ctrl+W" } },
+        { "strokes": "↑↓", "action": { "type": "close" } }
       ]
     }
   ]
@@ -189,7 +198,7 @@ GUI で編集・保存時に即リロード。手動編集も FileSystemWatcher 
 
 ## テスト方針
 
-- **ユニットテスト（xUnit）**: 軌跡→ストローク変換、ストローク→アクションマッチング、キーストローク文字列パーサ、プロファイル解決。Win32 非依存のピュアロジックを対象。判定しきい値・変換係数は動的解析で実測したオリジナル値を期待値に用いる
+- **ユニットテスト（xUnit）**: 軌跡→ストローク変換、ストローク→アクションマッチング、アクション定義の解釈（key / appcommand / close の振り分けとキー文字列パース）、プロファイル解決。Win32 非依存のピュアロジックを対象。判定しきい値・変換係数は動的解析で実測したオリジナル値を期待値に用いる
 - **挙動比較（移植の受け入れ基準）**: 同一の入力シナリオをオリジナルと再実装に与え、出力（送信されるキー、スクロール量・方向、右クリック抑制の有無）が一致することを確認。差異は設計書に記録し、許容/修正を判断
 - **手動確認**: フック・SendInput 周りは確認手順書（チェックリスト）をリポジトリに置く（メモ帳でジェスチャー、Excel でスクロールバー水平スクロール、Chrome で Ctrl+W 送信、右クリックメニューが正常に出ること、一時停止が効くこと）
 
