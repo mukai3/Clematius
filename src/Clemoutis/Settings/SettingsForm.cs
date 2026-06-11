@@ -54,17 +54,17 @@ internal sealed class SettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MinimizeBox = false;
         MaximizeBox = false;
-        ClientSize = new Size(520, 460);
+        ClientSize = new Size(520, 485);
 
-        var tabs = new TabControl { Dock = DockStyle.Top, Height = 410 };
+        var tabs = new TabControl { Dock = DockStyle.Top, Height = 435 };
         tabs.TabPages.Add(BuildGestureTab());
         tabs.TabPages.Add(BuildScrollTab());
         tabs.TabPages.Add(BuildWheelTab());
         tabs.TabPages.Add(BuildGeneralTab());
 
-        var ok = new Button { Text = "OK", Width = 90, Left = 230, Top = 422 };
-        var cancel = new Button { Text = "キャンセル", Width = 90, Left = 326, Top = 422 };
-        var apply = new Button { Text = "適用", Width = 90, Left = 422, Top = 422 };
+        var ok = new Button { Text = "OK", Width = 90, Left = 230, Top = 447 };
+        var cancel = new Button { Text = "キャンセル", Width = 90, Left = 326, Top = 447 };
+        var apply = new Button { Text = "適用", Width = 90, Left = 422, Top = 447 };
         ok.Click += (_, _) => { if (ApplyChanges()) { DialogResult = DialogResult.OK; Close(); } };
         cancel.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
         apply.Click += (_, _) => ApplyChanges();
@@ -111,13 +111,15 @@ internal sealed class SettingsForm : Form
         remove.Click += (_, _) => RemoveGesture();
 
         var wheelGroup = new GroupBox { Text = "右ボタン + ホイール" };
-        wheelGroup.SetBounds(12, 320, 436, 56);
+        wheelGroup.SetBounds(12, 320, 436, 90);
         var wheelUpBtn = new Button { Text = "上を設定...", Left = 8, Top = 22, Width = 90 };
-        var wheelDownBtn = new Button { Text = "下を設定...", Left = 224, Top = 22, Width = 90 };
+        var wheelDownBtn = new Button { Text = "下を設定...", Left = 8, Top = 54, Width = 90 };
         wheelUpBtn.Click += (_, _) => EditWheelAction(up: true);
         wheelDownBtn.Click += (_, _) => EditWheelAction(up: false);
-        _wheelUpLabel.SetBounds(102, 26, 120, 20);
-        _wheelDownLabel.SetBounds(318, 26, 110, 20);
+        _wheelUpLabel.SetBounds(106, 26, 320, 20);
+        _wheelDownLabel.SetBounds(106, 58, 320, 20);
+        _wheelUpLabel.AutoEllipsis = true;
+        _wheelDownLabel.AutoEllipsis = true;
         wheelGroup.Controls.AddRange(new Control[] { wheelUpBtn, _wheelUpLabel, wheelDownBtn, _wheelDownLabel });
 
         page.Controls.AddRange(new Control[]
