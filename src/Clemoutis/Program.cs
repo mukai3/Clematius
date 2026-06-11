@@ -49,7 +49,11 @@ internal sealed class AppContext : ApplicationContext
     private readonly ActiveConfigProvider _configProvider;
     private readonly ScrollEnhancer _scroll;
     private readonly GestureWpfOverlay _trail = new();
+    private readonly GestureCommandOverlay _command = new();
     private volatile bool _drawTrail;
+    private volatile bool _commandMode; // true=コマンド表示, false=軌跡
+    private int _lastX;
+    private int _lastY;
     private readonly System.Windows.Forms.Timer _instancePollTimer;
     // FileSystemWatcher のイベントを UI スレッドへ載せるための隠しコントロール
     private readonly Control _marshal = new();
@@ -67,14 +71,27 @@ internal sealed class AppContext : ApplicationContext
 
         _trail.ApplySettings(_configStore.Current.Gesture);
         _drawTrail = _configStore.Current.Gesture.DrawStroke;
+        _commandMode = _configStore.Current.Gesture.DrawingType == 1;
 
         var gesture = new GestureEngine(_configProvider, new ActionExecutor());
-        // 軌跡描画イベントはフックスレッドから来るので UI スレッドへマーシャルする
-        gesture.GestureStarted += (x, y) => RunOnUi(() => { if (_drawTrail) _trail.Begin(x, y); });
-        gesture.GesturePoint += (x, y) => RunOnUi(() => { if (_drawTrail) _trail.AddPoint(x, y); });
-        gesture.GestureProgress += (strokes, action) =>
-            RunOnUi(() => { if (_drawTrail) _trail.SetCommand(FormatProgress(strokes, action)); });
-        gesture.GestureEnded += () => RunOnUi(_trail.End);
+        // 表示イベントはフックスレッドから来るので UI スレッドへマーシャルする。
+        // drawingType に応じて軌跡（フルスクリーン）かコマンド（カーソル付近）を出す。
+        gesture.GestureStarted += (x, y) => RunOnUi(() =>
+        {
+            _lastX = x; _lastY = y;
+            if (_drawTrail && !_commandMode) _trail.Begin(x, y);
+        });
+        gesture.GesturePoint += (x, y) => RunOnUi(() =>
+        {
+            _lastX = x; _lastY = y;
+            if (_drawTrail && !_commandMode) _trail.AddPoint(x, y);
+        });
+        gesture.GestureProgress += (strokes, action) => RunOnUi(() =>
+        {
+            if (_drawTrail && _commandMode)
+                _command.ShowText(FormatProgress(strokes, action), _lastX, _lastY);
+        });
+        gesture.GestureEnded += () => RunOnUi(() => { _trail.End(); _command.HideText(); });
 
         var router = new InputRouter(_modifiers, gesture, _scroll);
         _mouseHook.Handler = router.OnMouse;
@@ -106,6 +123,7 @@ internal sealed class AppContext : ApplicationContext
         _configProvider.Update(cfg);
         _scroll.UpdateSettings(cfg.Scroll);
         _drawTrail = cfg.Gesture.DrawStroke;
+        _commandMode = cfg.Gesture.DrawingType == 1;
         _trail.ApplySettings(cfg.Gesture);
     }
 
@@ -192,6 +210,7 @@ internal sealed class AppContext : ApplicationContext
             _keyboardHook.Dispose();
             _configStore.Dispose();
             _trail.Close();
+            _command.Close();
             _marshal.Dispose();
         }
         base.Dispose(disposing);
