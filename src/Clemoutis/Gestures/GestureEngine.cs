@@ -22,12 +22,17 @@ internal sealed class GestureEngine
     private readonly IGestureContextProvider _provider;
     private readonly ActionExecutor _executor;
 
+    // フックコールバック（フックスレッド）とタイムアウトタイマー（別スレッド）から
+    // 共有状態を触るためロックで保護する。
+    private readonly object _gate = new();
     private StrokeEncoder? _encoder;
     private GestureMatcher? _matcher;
     private GestureAction? _wheelUp;
     private GestureAction? _wheelDown;
-    private bool _pending;
+    private System.Threading.Timer? _timeoutTimer;
+    private volatile bool _pending;
     private bool _wheelUsed;
+    private volatile bool _gestureCancelled; // タイムアウト中断済み→次の RBUTTONUP を飲み込む
     private int _startX;
     private int _startY;
 
@@ -52,23 +57,24 @@ internal sealed class GestureEngine
 
             case NativeMethods.WM_MOUSEMOVE:
                 if (_pending)
-                    _encoder!.Add(data.pt.X, data.pt.Y);
+                    OnMove(data.pt.X, data.pt.Y);
                 return false;
 
             case NativeMethods.WM_MOUSEWHEEL:
                 return _pending && OnWheelWhilePending(data);
 
             case NativeMethods.WM_RBUTTONUP:
-                if (!_pending)
-                    return false;
-                _pending = false;
-                return HandleRelease();
+                return OnRightUp();
 
             default:
                 if (_pending && IsButtonEvent(message))
                 {
-                    _pending = false;
-                    _encoder?.Reset();
+                    lock (_gate)
+                    {
+                        _pending = false;
+                        CancelTimeoutLocked();
+                        _encoder?.Reset();
+                    }
                 }
                 return false;
         }
@@ -80,16 +86,30 @@ internal sealed class GestureEngine
         if (ctx is null || !ctx.Enabled)
             return false; // 対象外: 通常の右クリックとして素通し
 
-        _matcher = ctx.Matcher;
-        _wheelUp = ctx.WheelUp;
-        _wheelDown = ctx.WheelDown;
-        _pending = true;
-        _wheelUsed = false;
-        _startX = x;
-        _startY = y;
-        _encoder = new StrokeEncoder(Math.Max(1, _provider.Range));
-        _encoder.Begin(x, y);
+        lock (_gate)
+        {
+            _matcher = ctx.Matcher;
+            _wheelUp = ctx.WheelUp;
+            _wheelDown = ctx.WheelDown;
+            _wheelUsed = false;
+            _gestureCancelled = false;
+            _startX = x;
+            _startY = y;
+            _encoder = new StrokeEncoder(Math.Max(1, _provider.Range));
+            _encoder.Begin(x, y);
+            _pending = true;
+            StartTimeoutLocked();
+        }
         return true; // DOWN を保留（飲み込む）
+    }
+
+    private void OnMove(int x, int y)
+    {
+        lock (_gate)
+        {
+            if (_pending && _encoder is not null && _encoder.Add(x, y))
+                CancelTimeoutLocked(); // 最初のストローク確定でタイムアウト不要
+        }
     }
 
     /// <summary>右ボタン押下中のホイール回転を右+ホイールジェスチャーとして処理する。</summary>
@@ -99,41 +119,106 @@ internal sealed class GestureEngine
         if (delta == 0)
             return false;
 
-        var action = delta > 0 ? _wheelUp : _wheelDown;
-        if (action is null)
-            return false; // 割当無し: 通常スクロールとして素通し
-
-        _wheelUsed = true; // UP 時にメニューを出さない／右クリックを再生しない
-        ExecuteAsync(action, TargetWindowResolver.Resolve(_startX, _startY));
+        GestureAction? action;
+        int sx, sy;
+        lock (_gate)
+        {
+            if (!_pending)
+                return false;
+            action = delta > 0 ? _wheelUp : _wheelDown;
+            if (action is null)
+                return false; // 割当無し: 通常スクロールとして素通し
+            _wheelUsed = true; // UP 時にメニューを出さない／右クリックを再生しない
+            CancelTimeoutLocked();
+            sx = _startX;
+            sy = _startY;
+        }
+        ExecuteAsync(action, TargetWindowResolver.Resolve(sx, sy));
         return true; // 通常スクロールを抑制
     }
 
-    private bool HandleRelease()
+    private bool OnRightUp()
     {
-        bool wheelUsed = _wheelUsed;
-        _wheelUsed = false;
+        GestureAction? action = null;
+        bool replay = false;
+        int sx = 0, sy = 0;
 
-        if (_encoder!.HasStrokes)
+        lock (_gate)
         {
-            var action = _matcher!.Match(_encoder.ToStrokeString());
-            _encoder.Reset();
-            if (action is not null)
+            if (_gestureCancelled)
             {
-                ExecuteAsync(action, TargetWindowResolver.Resolve(_startX, _startY));
-                return true; // メニューを出さない
+                _gestureCancelled = false;
+                return true; // タイムアウトで中断済み→再生済みなので UP を飲み込む
             }
-            return true; // 不一致: 何もしない（誤爆防止）
+            if (!_pending)
+                return false;
+            _pending = false;
+            CancelTimeoutLocked();
+
+            bool wheelUsed = _wheelUsed;
+            _wheelUsed = false;
+            sx = _startX;
+            sy = _startY;
+
+            if (_encoder!.HasStrokes)
+            {
+                action = _matcher!.Match(_encoder.ToStrokeString());
+                _encoder.Reset();
+                // 一致でも不一致でもメニューは出さない（不一致は誤爆防止で何もしない）
+            }
+            else
+            {
+                _encoder.Reset();
+                // 右+ホイール使用済みは右クリックを成立させない（メニュー抑制）
+                if (!wheelUsed)
+                    replay = true;
+            }
         }
 
-        _encoder.Reset();
-
-        // 右+ホイールを使ったセッションは右クリックを成立させない（メニュー抑制）
-        if (wheelUsed)
-            return true;
-
-        // ストローク無し・ホイール無し: 通常の右クリックを成立させる
-        ReplayRightClick();
+        if (action is not null)
+            ExecuteAsync(action, TargetWindowResolver.Resolve(sx, sy));
+        if (replay)
+            ReplayRightClick();
         return true;
+    }
+
+    // ── 入力タイムアウト（押下後ストローク無しなら通常の右クリックに戻す） ──
+
+    private void StartTimeoutLocked()
+    {
+        _timeoutTimer?.Dispose();
+        int ms = _provider.TimeoutMs;
+        if (ms <= 0)
+        {
+            _timeoutTimer = null;
+            return;
+        }
+        _timeoutTimer = new System.Threading.Timer(_ => OnTimeout(), null, ms, Timeout.Infinite);
+    }
+
+    private void CancelTimeoutLocked()
+    {
+        _timeoutTimer?.Dispose();
+        _timeoutTimer = null;
+    }
+
+    private void OnTimeout()
+    {
+        bool replay = false;
+        lock (_gate)
+        {
+            if (!_pending)
+                return; // 既に確定/解放済み
+            if (_encoder!.HasStrokes || _wheelUsed)
+                return; // 入力が始まっている→タイムアウト無効
+            _pending = false;
+            _gestureCancelled = true; // 次の RBUTTONUP を飲み込む
+            _encoder.Reset();
+            CancelTimeoutLocked();
+            replay = true;
+        }
+        if (replay)
+            ReplayRightClick();
     }
 
     private static bool IsButtonEvent(int message) => message

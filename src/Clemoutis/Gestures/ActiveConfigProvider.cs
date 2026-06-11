@@ -28,6 +28,11 @@ internal sealed class ActiveConfigProvider : IGestureContextProvider
         get { lock (_gate) return _config.Gesture.Range; }
     }
 
+    public int TimeoutMs
+    {
+        get { lock (_gate) return _config.Gesture.TimeoutMs; }
+    }
+
     public void Update(ClemoutisConfig config)
     {
         lock (_gate)

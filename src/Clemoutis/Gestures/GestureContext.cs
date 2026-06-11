@@ -23,4 +23,7 @@ internal interface IGestureContextProvider
 
     /// <summary>ストローク確定のしきい値（gesture.range）。</summary>
     int Range { get; }
+
+    /// <summary>入力開始のタイムアウト（ms）。0 以下で無効。gesture.timeoutMs。</summary>
+    int TimeoutMs { get; }
 }
