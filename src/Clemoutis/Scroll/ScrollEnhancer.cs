@@ -22,13 +22,13 @@ internal sealed class ScrollEnhancer
     {
         _modifiers = modifiers;
         _settings = settings;
-        _resolver = new ModifierScrollResolver(settings.ModifierRules);
+        _resolver = new ModifierScrollResolver(settings.ModifierScroll);
     }
 
     public void UpdateSettings(ScrollSettings settings)
     {
         _settings = settings;
-        _resolver = new ModifierScrollResolver(settings.ModifierRules);
+        _resolver = new ModifierScrollResolver(settings.ModifierScroll);
     }
 
     /// <returns>true ならイベントを飲み込む</returns>

@@ -11,9 +11,19 @@ public sealed record ScrollSettings
     public int MergeWheelDelta { get; init; } = 2;
     public int WheelResolution { get; init; } = 1;
     public int AutoWheelResolution { get; init; } = 3;
-    public IReadOnlyList<ModifierScrollRule> ModifierRules { get; init; } =
-        new[] { new ModifierScrollRule("Alt", "code:55") };
+
+    /// <summary>
+    /// 修飾キー押下中のホイール挙動。オリジナルと同じく Ctrl / Shift / Ctrl+Shift の
+    /// 3スロットを持つ（Alt は対象外）。値は behavior 文字列（"none" / "horizontal" 等）。
+    /// 既定はユーザー ini の ScrollExCtrl/Shift/CtrlShift がいずれも 0 のため "none"。
+    /// </summary>
+    public ModifierScrollSettings ModifierScroll { get; init; } = new();
 }
 
-/// <summary>修飾キー押下中のホイール変換ルール。behavior の意味は動的解析で確定予定。</summary>
-public sealed record ModifierScrollRule(string Modifier, string Behavior);
+/// <summary>Ctrl / Shift / Ctrl+Shift それぞれのホイール挙動。</summary>
+public sealed record ModifierScrollSettings
+{
+    public string Ctrl { get; init; } = "none";
+    public string Shift { get; init; } = "none";
+    public string CtrlShift { get; init; } = "none";
+}

@@ -3,35 +3,27 @@ using Clemoutis.Core.Config;
 namespace Clemoutis.Core.Scroll;
 
 /// <summary>
-/// 修飾キーの押下状態とルール一覧から、適用すべきホイール変換を決める。Win32 非依存。
-/// 複数の修飾キーが該当する場合は最初に一致したルールを採用する。
+/// 修飾キーの押下状態から、適用すべきホイール変換を決める。Win32 非依存。
+/// オリジナルに合わせ Ctrl / Shift / Ctrl+Shift の3通りのみを扱う（Alt は対象外）。
+/// Ctrl+Shift は単独 Ctrl・単独 Shift とは別物として優先的に判定する。
 /// </summary>
 public sealed class ModifierScrollResolver
 {
-    private readonly IReadOnlyList<ModifierScrollRule> _rules;
+    private readonly ModifierScrollSettings _settings;
 
-    public ModifierScrollResolver(IReadOnlyList<ModifierScrollRule> rules)
+    public ModifierScrollResolver(ModifierScrollSettings settings)
     {
-        _rules = rules;
+        _settings = settings;
     }
 
-    public WheelConversion Resolve(IModifierState modifiers)
+    public WheelConversion Resolve(IModifierState m)
     {
-        foreach (var rule in _rules)
-        {
-            if (IsActive(rule.Modifier, modifiers))
-                return ScrollBehaviorParser.Parse(rule.Behavior);
-        }
+        if (m.Ctrl && m.Shift)
+            return ScrollBehaviorParser.Parse(_settings.CtrlShift);
+        if (m.Ctrl)
+            return ScrollBehaviorParser.Parse(_settings.Ctrl);
+        if (m.Shift)
+            return ScrollBehaviorParser.Parse(_settings.Shift);
         return WheelConversion.None;
     }
-
-    private static bool IsActive(string modifier, IModifierState m) =>
-        modifier.Trim().ToLowerInvariant() switch
-        {
-            "shift" => m.Shift,
-            "ctrl" or "control" => m.Ctrl,
-            "alt" => m.Alt,
-            "win" or "windows" => m.Win,
-            _ => false,
-        };
 }
