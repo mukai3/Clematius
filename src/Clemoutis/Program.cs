@@ -95,10 +95,19 @@ internal sealed class AppContext : ApplicationContext
         _tray.ShowInfo($"設定ファイルが壊れていたため既定設定で起動しました。\n退避先: {backupPath}");
     }
 
+    private Settings.SettingsForm? _settingsForm;
+
     private void OnOpenSettings()
     {
-        // フェーズ5で SettingsForm に置き換える
-        _tray.ShowInfo("設定画面はフェーズ5で実装予定です。");
+        if (_settingsForm is { IsDisposed: false })
+        {
+            _settingsForm.Activate();
+            return;
+        }
+        _settingsForm = new Settings.SettingsForm(_configStore.Current);
+        _settingsForm.Applied += cfg => _configStore.Save(cfg);
+        _settingsForm.FormClosed += (_, _) => _settingsForm = null;
+        _settingsForm.Show();
     }
 
     private void OnPauseChanged(bool paused)
