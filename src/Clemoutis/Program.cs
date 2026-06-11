@@ -105,6 +105,18 @@ internal sealed class AppContext : ApplicationContext
         _trail.ApplySettings(cfg.Gesture);
     }
 
+    // メインウィンドウを持たない常駐アプリのため、設定画面を確実に前面化する
+    private static void BringToFront(Form form)
+    {
+        if (form.WindowState == FormWindowState.Minimized)
+            form.WindowState = FormWindowState.Normal;
+        form.Activate();
+        bool top = form.TopMost;
+        form.TopMost = true;
+        form.TopMost = top;
+        form.BringToFront();
+    }
+
     // フックスレッドからの呼び出しを UI スレッドへ載せる（隠しコントロール経由）
     private void RunOnUi(Action action)
     {
@@ -134,13 +146,14 @@ internal sealed class AppContext : ApplicationContext
     {
         if (_settingsForm is { IsDisposed: false })
         {
-            _settingsForm.Activate();
+            BringToFront(_settingsForm);
             return;
         }
         _settingsForm = new Settings.SettingsForm(_configStore.Current);
         _settingsForm.Applied += cfg => _configStore.Save(cfg);
         _settingsForm.FormClosed += (_, _) => _settingsForm = null;
         _settingsForm.Show();
+        BringToFront(_settingsForm);
     }
 
     private void OnPauseChanged(bool paused)

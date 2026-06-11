@@ -68,6 +68,7 @@ internal sealed class StrokeCaptureDialog : Form
     private void OnCanvasMouseDown(object? sender, MouseEventArgs e)
     {
         if (e.Button is not (MouseButtons.Left or MouseButtons.Right)) return;
+        _canvas.Capture = true; // 右ボタンでも移動/解放を確実に受け取る
         _capturing = true;
         _trail.Clear();
         _trail.Add(e.Location);
@@ -88,6 +89,7 @@ internal sealed class StrokeCaptureDialog : Form
     private void OnCanvasMouseUp(object? sender, MouseEventArgs e)
     {
         if (!_capturing) return;
+        _canvas.Capture = false;
         _capturing = false;
         string strokes = _encoder.ToStrokeString();
         if (strokes.Length > 0)
