@@ -29,4 +29,13 @@ internal static class ActionDisplay
         CloseAction => TypeClose,
         _ => TypeKey,
     };
+
+    /// <summary>画面上のコマンド表示用の簡潔なラベル（例: "Ctrl+W" / "Close"）。</summary>
+    public static string ShortLabel(GestureAction action) => action switch
+    {
+        KeyAction k => k.Stroke.ToString(),
+        AppCommandAction c => c.Command.ToString(),
+        CloseAction => "Close",
+        _ => "",
+    };
 }

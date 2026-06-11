@@ -35,7 +35,8 @@ internal sealed class SettingsForm : Form
     private readonly NumericUpDown _range = new() { Minimum = 1, Maximum = 100 };
     private readonly NumericUpDown _timeout = new() { Minimum = 0, Maximum = 10000, Increment = 100 };
     private readonly NumericUpDown _pushHold = new() { Minimum = 0, Maximum = 5000, Increment = 50 };
-    private readonly CheckBox _drawStroke = new() { Text = "ジェスチャーの軌跡を描画する" };
+    private readonly CheckBox _drawStroke = new() { Text = "ジェスチャーの軌跡/コマンドを表示する" };
+    private readonly ComboBox _drawingType = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly NumericUpDown _strokeWidth = new() { Minimum = 1, Maximum = 20 };
     private readonly Button _validColor = new() { Text = "有効色" };
     private readonly Button _invalidColor = new() { Text = "無効色" };
@@ -225,7 +226,7 @@ internal sealed class SettingsForm : Form
         trayGroup.Controls.AddRange(new Control[] { _showTrayIcon, _showBalloonTip });
 
         var gestureGroup = new GroupBox { Text = "ジェスチャーの詳細" };
-        gestureGroup.SetBounds(12, 100, 480, 200);
+        gestureGroup.SetBounds(12, 100, 480, 230);
 
         gestureGroup.Controls.Add(new Label { Text = "1 ストロークの距離 (px)", Left = 16, Top = 30, Width = 160 });
         _range.SetBounds(180, 27, 80, 23);
@@ -235,16 +236,19 @@ internal sealed class SettingsForm : Form
         _pushHold.SetBounds(180, 87, 80, 23);
 
         _drawStroke.SetBounds(16, 120, 300, 23);
-        gestureGroup.Controls.Add(new Label { Text = "幅 (px)", Left = 16, Top = 152, Width = 150 });
-        _strokeWidth.SetBounds(180, 149, 80, 23);
-        _validColor.SetBounds(280, 147, 90, 27);
-        _invalidColor.SetBounds(376, 147, 90, 27);
+        gestureGroup.Controls.Add(new Label { Text = "表示方法", Left = 16, Top = 152, Width = 150 });
+        _drawingType.SetBounds(180, 149, 160, 23);
+        _drawingType.Items.AddRange(new object[] { "軌跡（線）", "コマンド表示" });
+        gestureGroup.Controls.Add(new Label { Text = "幅 (px)", Left = 16, Top = 184, Width = 150 });
+        _strokeWidth.SetBounds(180, 181, 80, 23);
+        _validColor.SetBounds(280, 179, 90, 27);
+        _invalidColor.SetBounds(376, 179, 90, 27);
         _validColor.Click += (_, _) => PickColor(ref _validColorValue, _validColor);
         _invalidColor.Click += (_, _) => PickColor(ref _invalidColorValue, _invalidColor);
 
         gestureGroup.Controls.AddRange(new Control[]
         {
-            _range, _timeout, _pushHold, _drawStroke, _strokeWidth, _validColor, _invalidColor,
+            _range, _timeout, _pushHold, _drawStroke, _drawingType, _strokeWidth, _validColor, _invalidColor,
         });
 
         page.Controls.AddRange(new Control[] { trayGroup, gestureGroup });
@@ -275,6 +279,7 @@ internal sealed class SettingsForm : Form
         _timeout.Value = Clamp(_original.Gesture.TimeoutMs, _timeout);
         _pushHold.Value = Clamp(_original.Gesture.PushHoldTimeMs, _pushHold);
         _drawStroke.Checked = _original.Gesture.DrawStroke;
+        _drawingType.SelectedIndex = _original.Gesture.DrawingType == 1 ? 1 : 0;
         _strokeWidth.Value = Clamp(_original.Gesture.StrokeWidth, _strokeWidth);
         _validColorValue = ParseColor(_original.Gesture.ValidStrokeColor);
         _invalidColorValue = ParseColor(_original.Gesture.InvalidStrokeColor);
@@ -318,6 +323,7 @@ internal sealed class SettingsForm : Form
             TimeoutMs = (int)_timeout.Value,
             PushHoldTimeMs = (int)_pushHold.Value,
             DrawStroke = _drawStroke.Checked,
+            DrawingType = _drawingType.SelectedIndex,
             StrokeWidth = (int)_strokeWidth.Value,
             ValidStrokeColor = ToHex(_validColorValue),
             InvalidStrokeColor = ToHex(_invalidColorValue),

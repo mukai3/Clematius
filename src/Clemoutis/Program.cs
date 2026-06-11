@@ -68,6 +68,8 @@ internal sealed class AppContext : ApplicationContext
         // 軌跡描画イベントはフックスレッドから来るので UI スレッドへマーシャルする
         gesture.GestureStarted += (x, y) => RunOnUi(() => { if (_drawTrail) _trail.Begin(x, y); });
         gesture.GesturePoint += (x, y) => RunOnUi(() => { if (_drawTrail) _trail.AddPoint(x, y); });
+        gesture.GestureProgress += (strokes, action) =>
+            RunOnUi(() => { if (_drawTrail) _trail.SetCommand(FormatProgress(strokes, action)); });
         gesture.GestureEnded += () => RunOnUi(_trail.End);
 
         var router = new InputRouter(_modifiers, gesture, _scroll);
@@ -108,6 +110,17 @@ internal sealed class AppContext : ApplicationContext
     {
         if (_marshal.IsHandleCreated)
             _marshal.BeginInvoke(action);
+    }
+
+    // コマンド表示用テキスト: ストロークを矢印化し、成立コマンドがあれば併記（例 "↓→ Close"）
+    private static string FormatProgress(string strokes, Clemoutis.Core.Actions.GestureAction? action)
+    {
+        var arrows = strokes.Select(c => c switch
+        {
+            'U' => '↑', 'D' => '↓', 'L' => '←', 'R' => '→', _ => c,
+        }).ToArray();
+        string s = new(arrows);
+        return action is null ? s : $"{s}  {Settings.ActionDisplay.ShortLabel(action)}";
     }
 
     private void OnConfigCorrupted(string backupPath)

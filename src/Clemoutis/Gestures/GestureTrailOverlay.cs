@@ -10,9 +10,14 @@ internal sealed class GestureTrailOverlay : Form
 {
     private static readonly Color TransparentKey = Color.Magenta;
 
+    /// <summary>描画方法。0=軌跡(線)、1=コマンド表示(テキスト)。</summary>
+    internal enum DrawMode { Trail, Command }
+
     private readonly List<Point> _points = new();
     private Color _strokeColor = Color.FromArgb(0x80, 0xFF, 0x00);
     private int _strokeWidth = 2;
+    private DrawMode _mode = DrawMode.Trail;
+    private string _commandText = "";
 
     public GestureTrailOverlay()
     {
@@ -46,6 +51,15 @@ internal sealed class GestureTrailOverlay : Form
     {
         _strokeWidth = Math.Max(1, g.StrokeWidth);
         _strokeColor = ParseColor(g.ValidStrokeColor);
+        _mode = g.DrawingType == 1 ? DrawMode.Command : DrawMode.Trail;
+    }
+
+    /// <summary>コマンド表示モードで表示するテキストを設定する。</summary>
+    public void SetCommand(string text)
+    {
+        _commandText = text;
+        if (Visible && _mode == DrawMode.Command)
+            Invalidate();
     }
 
     /// <summary>ジェスチャー開始。全画面に広げて軌跡をリセットする。</summary>
@@ -75,6 +89,7 @@ internal sealed class GestureTrailOverlay : Form
     public void End()
     {
         _points.Clear();
+        _commandText = "";
         if (Visible)
             Visible = false;
     }
@@ -84,6 +99,12 @@ internal sealed class GestureTrailOverlay : Form
 
     protected override void OnPaint(PaintEventArgs e)
     {
+        if (_mode == DrawMode.Command)
+        {
+            DrawCommand(e.Graphics);
+            return;
+        }
+
         if (_points.Count >= 2)
         {
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
@@ -95,6 +116,26 @@ internal sealed class GestureTrailOverlay : Form
             };
             e.Graphics.DrawLines(pen, _points.ToArray());
         }
+    }
+
+    private void DrawCommand(Graphics g)
+    {
+        if (string.IsNullOrEmpty(_commandText))
+            return;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+        using var font = new Font(Font.FontFamily, 28, FontStyle.Bold);
+        var size = g.MeasureString(_commandText, font);
+        float x = (Width - size.Width) / 2f;
+        float y = Height * 0.12f;
+        var box = new RectangleF(x - 18, y - 10, size.Width + 36, size.Height + 20);
+        // TransparencyKey は Magenta。背景は不透明の濃色ボックスで視認性を確保する。
+        using var bg = new SolidBrush(Color.FromArgb(32, 32, 40));
+        g.FillRectangle(bg, box);
+        using var border = new Pen(_strokeColor, 2);
+        g.DrawRectangle(border, box.X, box.Y, box.Width, box.Height);
+        using var text = new SolidBrush(Color.White);
+        g.DrawString(_commandText, font, text, x, y);
     }
 
     private static Color ParseColor(string hex)

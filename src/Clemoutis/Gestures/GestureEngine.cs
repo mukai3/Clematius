@@ -40,6 +40,8 @@ internal sealed class GestureEngine
     public event Action<int, int>? GestureStarted;
     public event Action<int, int>? GesturePoint;
     public event Action? GestureEnded;
+    // ストローク確定ごとに、現在のストローク列とマッチしたアクション（無ければ null）を通知
+    public event Action<string, GestureAction?>? GestureProgress;
 
     public GestureEngine(IGestureContextProvider provider, ActionExecutor executor)
     {
@@ -114,12 +116,20 @@ internal sealed class GestureEngine
     {
         if (!_pending)
             return;
+        string? strokes = null;
+        GestureAction? match = null;
         lock (_gate)
         {
             if (_pending && _encoder is not null && _encoder.Add(x, y))
+            {
                 CancelTimeoutLocked(); // 最初のストローク確定でタイムアウト不要
+                strokes = _encoder.ToStrokeString();
+                match = _matcher?.Match(strokes);
+            }
         }
         GesturePoint?.Invoke(x, y);
+        if (strokes is not null)
+            GestureProgress?.Invoke(strokes, match);
     }
 
     /// <summary>右ボタン押下中のホイール回転を右+ホイールジェスチャーとして処理する。</summary>
