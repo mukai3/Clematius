@@ -43,6 +43,8 @@ internal sealed class AppContext : ApplicationContext
     private readonly ConfigStore _configStore;
     private readonly ActiveConfigProvider _configProvider;
     private readonly ScrollEnhancer _scroll;
+    private readonly GestureTrailOverlay _trail = new();
+    private volatile bool _drawTrail;
     private readonly System.Windows.Forms.Timer _instancePollTimer;
     // FileSystemWatcher のイベントを UI スレッドへ載せるための隠しコントロール
     private readonly Control _marshal = new();
@@ -58,7 +60,16 @@ internal sealed class AppContext : ApplicationContext
         _configStore.Changed += OnConfigChanged;
         _configStore.Corrupted += OnConfigCorrupted;
 
+        _ = _trail.Handle; // ハンドル生成
+        _trail.ApplySettings(_configStore.Current.Gesture);
+        _drawTrail = _configStore.Current.Gesture.DrawStroke;
+
         var gesture = new GestureEngine(_configProvider, new ActionExecutor());
+        // 軌跡描画イベントはフックスレッドから来るので UI スレッドへマーシャルする
+        gesture.GestureStarted += (x, y) => RunOnUi(() => { if (_drawTrail) _trail.Begin(x, y); });
+        gesture.GesturePoint += (x, y) => RunOnUi(() => { if (_drawTrail) _trail.AddPoint(x, y); });
+        gesture.GestureEnded += () => RunOnUi(_trail.End);
+
         var router = new InputRouter(_modifiers, gesture, _scroll);
         _mouseHook.Handler = router.OnMouse;
         _keyboardHook.Handler = router.OnKeyboard;
@@ -88,6 +99,15 @@ internal sealed class AppContext : ApplicationContext
     {
         _configProvider.Update(cfg);
         _scroll.UpdateSettings(cfg.Scroll);
+        _drawTrail = cfg.Gesture.DrawStroke;
+        _trail.ApplySettings(cfg.Gesture);
+    }
+
+    // フックスレッドからの呼び出しを UI スレッドへ載せる（隠しコントロール経由）
+    private void RunOnUi(Action action)
+    {
+        if (_marshal.IsHandleCreated)
+            _marshal.BeginInvoke(action);
     }
 
     private void OnConfigCorrupted(string backupPath)
@@ -141,6 +161,7 @@ internal sealed class AppContext : ApplicationContext
             _mouseHook.Dispose();
             _keyboardHook.Dispose();
             _configStore.Dispose();
+            _trail.Dispose();
             _marshal.Dispose();
         }
         base.Dispose(disposing);

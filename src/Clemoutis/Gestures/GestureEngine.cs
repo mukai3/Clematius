@@ -36,6 +36,11 @@ internal sealed class GestureEngine
     private int _startX;
     private int _startY;
 
+    // 軌跡描画用イベント（フックスレッドから発火する。購読側で UI スレッドへマーシャルすること）
+    public event Action<int, int>? GestureStarted;
+    public event Action<int, int>? GesturePoint;
+    public event Action? GestureEnded;
+
     public GestureEngine(IGestureContextProvider provider, ActionExecutor executor)
     {
         _provider = provider;
@@ -75,6 +80,7 @@ internal sealed class GestureEngine
                         CancelTimeoutLocked();
                         _encoder?.Reset();
                     }
+                    GestureEnded?.Invoke();
                 }
                 return false;
         }
@@ -100,16 +106,20 @@ internal sealed class GestureEngine
             _pending = true;
             StartTimeoutLocked();
         }
+        GestureStarted?.Invoke(x, y);
         return true; // DOWN を保留（飲み込む）
     }
 
     private void OnMove(int x, int y)
     {
+        if (!_pending)
+            return;
         lock (_gate)
         {
             if (_pending && _encoder is not null && _encoder.Add(x, y))
                 CancelTimeoutLocked(); // 最初のストローク確定でタイムアウト不要
         }
+        GesturePoint?.Invoke(x, y);
     }
 
     /// <summary>右ボタン押下中のホイール回転を右+ホイールジェスチャーとして処理する。</summary>
@@ -179,6 +189,7 @@ internal sealed class GestureEngine
             ExecuteAsync(action, TargetWindowResolver.Resolve(sx, sy));
         if (replay)
             ReplayRightClick();
+        GestureEnded?.Invoke();
         return true;
     }
 
@@ -219,6 +230,7 @@ internal sealed class GestureEngine
         }
         if (replay)
             ReplayRightClick();
+        GestureEnded?.Invoke();
     }
 
     private static bool IsButtonEvent(int message) => message
