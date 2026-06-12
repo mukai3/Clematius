@@ -37,6 +37,9 @@ internal sealed partial class SettingsViewModel : ObservableObject
     // ── 一般: トレイ＋ジェスチャー詳細 ──
     public GeneralViewModel General { get; }
 
+    // ── ジェスチャー: プロファイル＋一覧＋右ボタンホイール ──
+    public GestureViewModel Gesture { get; }
+
     public SettingsViewModel(ClemoutisConfig config)
     {
         _original = config;
@@ -73,6 +76,7 @@ internal sealed partial class SettingsViewModel : ObservableObject
         _windowOpacity = Math.Clamp(tb.WindowOpacity, 10, 90);
 
         General = new GeneralViewModel(config, NotifyChanged);
+        Gesture = new GestureViewModel(config.Profiles, NotifyChanged);
     }
 
     private ChoiceSlotViewModel Slot(
@@ -152,6 +156,7 @@ internal sealed partial class SettingsViewModel : ObservableObject
             Titlebar = titlebar,
             Gesture = gesture,
             Tray = tray,
+            Profiles = Gesture.BuildProfiles(),
         };
     }
 
