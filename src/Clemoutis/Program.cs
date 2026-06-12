@@ -24,11 +24,14 @@ static class Program
         using (instance)
         {
             ApplicationConfiguration.Initialize();
-            // WPF オーバーレイ用に Application.Current を用意（WinForms 主体のため Run はしない）
-            _ = new System.Windows.Application
+            // WPF オーバーレイ/設定画面用に Application.Current を用意（WinForms 主体のため Run はしない）
+            var wpfApp = new System.Windows.Application
             {
                 ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown,
             };
+            // WPF-UI のテーマ（設定画面 SettingsUi で使用）。オーバーレイは独自描画のため影響なし
+            wpfApp.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ThemesDictionary());
+            wpfApp.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ControlsDictionary());
             using var ctx = new AppContext(instance);
             Application.Run(ctx);
         }

@@ -20,6 +20,9 @@ internal sealed class KeyCaptureBox : TextBox
     }
 
     /// <summary>現在保持しているキー。未設定なら null。</summary>
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(
+        System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public KeyStroke? Stroke
     {
         get => _stroke;
