@@ -6,5 +6,6 @@ public partial class WindowPage
     public WindowPage()
     {
         InitializeComponent();
+        PageDataContext.AttachFallback(this);
     }
 }

@@ -10,7 +10,7 @@ namespace Clemoutis.SettingsUi;
 /// </summary>
 public partial class SettingsWindow
 {
-    public SettingsViewModel ViewModel { get; }
+    internal SettingsViewModel ViewModel { get; }
 
     public SettingsWindow(ClemoutisConfig config)
     {

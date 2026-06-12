@@ -3,9 +3,32 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="拡張スクロール">
-    <TextBlock
-        HorizontalAlignment="Center"
-        VerticalAlignment="Center"
-        Opacity="0.6"
-        Text="拡張スクロール (フェーズ2で実装)" />
+    <ScrollViewer Padding="24,16" VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="640" HorizontalAlignment="Stretch">
+            <TextBlock
+                Margin="0,0,0,12"
+                FontSize="16"
+                FontWeight="SemiBold"
+                Text="修飾キーを押しているときの動作" />
+            <ItemsControl ItemsSource="{Binding ModifierSlots}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="250" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock VerticalAlignment="Center" Text="{Binding Label}" />
+                            <ComboBox
+                                Grid.Column="1"
+                                DisplayMemberPath="Display"
+                                ItemsSource="{Binding Choices}"
+                                SelectedValue="{Binding Value}"
+                                SelectedValuePath="Value" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
 </Page>

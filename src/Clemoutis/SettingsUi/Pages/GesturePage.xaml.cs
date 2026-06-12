@@ -6,5 +6,6 @@ public partial class GesturePage
     public GesturePage()
     {
         InitializeComponent();
+        PageDataContext.AttachFallback(this);
     }
 }

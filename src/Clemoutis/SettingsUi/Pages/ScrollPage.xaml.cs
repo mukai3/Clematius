@@ -6,5 +6,6 @@ public partial class ScrollPage
     public ScrollPage()
     {
         InitializeComponent();
+        PageDataContext.AttachFallback(this);
     }
 }
