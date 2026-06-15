@@ -14,6 +14,10 @@ internal sealed class WindowActionExecutor
     // ウィンドウシェードの巻き上げ前の高さ（hwnd → 元の高さ）
     private readonly ConcurrentDictionary<nint, int> _shadeHeights = new();
 
+    // Clemotius が半透明化（WS_EX_LAYERED 付与）したウィンドウ。元から layered な
+    // 他アプリの状態を壊さないよう、解除対象を自分が付けたものに限定するために記録する。
+    private readonly ConcurrentDictionary<nint, byte> _translucentWindows = new();
+
     /// <summary>半透明化の不透明度（%）。設定リロードで更新される。</summary>
     public volatile int OpacityPercent = 50;
 
@@ -97,16 +101,25 @@ internal sealed class WindowActionExecutor
     private void ToggleTranslucent(nint hwnd)
     {
         nint ex = InputNative.GetWindowLongPtrW(hwnd, InputNative.GWL_EXSTYLE);
-        if ((ex & InputNative.WS_EX_LAYERED) != 0)
+
+        if (_translucentWindows.ContainsKey(hwnd))
         {
-            // 元に戻す（レイヤード解除）
+            // 自分が付けた半透明だけ解除する（WS_EX_LAYERED を外す）
             InputNative.SetWindowLongPtrW(hwnd, InputNative.GWL_EXSTYLE,
                 ex & ~(nint)InputNative.WS_EX_LAYERED);
+            _translucentWindows.TryRemove(hwnd, out _);
             return;
         }
+
+        // 元から layered なアプリ（per-pixel alpha やクリック透過などを使う）は触らない。
+        // WS_EX_LAYERED を勝手に外すと相手の描画・透明度の前提を壊すため。
+        if ((ex & InputNative.WS_EX_LAYERED) != 0)
+            return;
+
         InputNative.SetWindowLongPtrW(hwnd, InputNative.GWL_EXSTYLE,
             ex | InputNative.WS_EX_LAYERED);
         byte alpha = (byte)Math.Clamp(OpacityPercent * 255 / 100, 16, 255);
         InputNative.SetLayeredWindowAttributes(hwnd, 0, alpha, InputNative.LWA_ALPHA);
+        _translucentWindows[hwnd] = 1;
     }
 }

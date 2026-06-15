@@ -29,13 +29,21 @@ internal sealed class ActionExecutor
         }
     }
 
+    // ハングした対象アプリを待ち続けないための上限（ms）。Execute は Task.Run 経由で
+    // 呼ばれるためフックスレッドは止まらないが、応答なしアプリへの同期送信が溜まると
+    // ThreadPool を圧迫し、戻る/進む等のアクション処理全体が遅延し得る。SMTO_ABORTIFHUNG
+    // でハング時は即座に打ち切る（戻る/進むは失敗しても無視でよい）。
+    private const uint AppCommandTimeoutMs = 1000;
+
     private static void SendAppCommand(AppCommand command, nint targetWindow)
     {
         if (targetWindow == 0)
             return;
         // WM_APPCOMMAND: lParam 上位ワードにコマンド、wParam に対象ウィンドウ
         nint lParam = (nint)((int)command << 16);
-        InputNative.SendMessageW(targetWindow, InputNative.WM_APPCOMMAND, targetWindow, lParam);
+        InputNative.SendMessageTimeoutW(
+            targetWindow, InputNative.WM_APPCOMMAND, targetWindow, lParam,
+            InputNative.SMTO_ABORTIFHUNG, AppCommandTimeoutMs, out _);
     }
 
     // SendKey は Task.Run から並行に呼ばれ得る（高速なホイールジェスチャ等）。
