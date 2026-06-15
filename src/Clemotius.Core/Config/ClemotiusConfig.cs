@@ -13,9 +13,12 @@ public sealed record ClemotiusConfig
     public ScrollSettings Scroll { get; init; } = new();
     public TitlebarSettings Titlebar { get; init; } = new();
     public TraySettings Tray { get; init; } = new();
-    public IReadOnlyList<GestureProfile> Profiles { get; init; } = new[] { DefaultProfile() };
+    public IReadOnlyList<GestureProfile> Profiles { get; init; } = new[] { DefaultProfile(), DefaultBrowserProfile() };
 
-    /// <summary>ユーザー ini 由来の既定ジェスチャーを持つ Default プロファイル。</summary>
+    /// <summary>
+    /// 全アプリ共通のグローバルプロファイル。あらゆるアプリで使える「戻る/進む」のみを持つ。
+    /// ブラウザ専用の操作は <see cref="DefaultBrowserProfile"/> 側に分離する。
+    /// </summary>
     public static GestureProfile DefaultProfile() => new()
     {
         Name = "Default",
@@ -23,8 +26,22 @@ public sealed record ClemotiusConfig
         GesturesEnabled = true,
         Gestures = new[]
         {
-            new GestureBinding("L", new AppCommandAction(AppCommand.BrowserBackward)),
-            new GestureBinding("R", new AppCommandAction(AppCommand.BrowserForward)),
+            new GestureBinding("L", new AppCommandAction(AppCommand.BrowserBackward)),  // 戻る
+            new GestureBinding("R", new AppCommandAction(AppCommand.BrowserForward)),   // 進む
+        },
+    };
+
+    /// <summary>
+    /// 既定の Web ブラウザ用プロファイル（chrome / msedge）。タブ閉じ・再読込・先頭/末尾移動・
+    /// 右ボタン+ホイールでのタブ切替を持つ。戻る/進むはグローバルから継承される。
+    /// </summary>
+    public static GestureProfile DefaultBrowserProfile() => new()
+    {
+        Name = "ブラウザ",
+        ProcessPattern = "chrome, msedge",
+        GesturesEnabled = true,
+        Gestures = new[]
+        {
             new GestureBinding("DR", new KeyAction(KeyStrokeParser.Parse("Ctrl+W"))),
             new GestureBinding("UDU", new KeyAction(KeyStrokeParser.Parse("Ctrl+F5"))),
             new GestureBinding("DUD", new KeyAction(KeyStrokeParser.Parse("Ctrl+F5"))),

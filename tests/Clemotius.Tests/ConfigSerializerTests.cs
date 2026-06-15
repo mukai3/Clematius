@@ -85,10 +85,22 @@ public class ConfigSerializerTests
     }
 
     [Fact]
-    public void DefaultProfile_HasWheelTabSwitchBindings()
+    public void DefaultProfile_HasOnlyBackForward()
     {
-        // R+WU=前のタブ / R+WD=次のタブ（ユーザー ini 由来）
+        // グローバルはあらゆるアプリで使える戻る/進むのみ。ホイール割当は無し。
         var profile = ClemotiusConfig.DefaultProfile();
+        Assert.Equal("*", profile.ProcessPattern);
+        Assert.Null(profile.WheelUp);
+        Assert.Null(profile.WheelDown);
+        Assert.Equal(new[] { "L", "R" }, profile.Gestures.Select(g => g.Strokes).ToArray());
+    }
+
+    [Fact]
+    public void DefaultBrowserProfile_TargetsBrowsersAndHasWheelTabSwitch()
+    {
+        // R+WU=前のタブ / R+WD=次のタブ（ユーザー ini 由来）はブラウザ用プロファイルへ
+        var profile = ClemotiusConfig.DefaultBrowserProfile();
+        Assert.Equal("chrome, msedge", profile.ProcessPattern);
         var up = Assert.IsType<KeyAction>(profile.WheelUp);
         var down = Assert.IsType<KeyAction>(profile.WheelDown);
         Assert.Equal("Ctrl+Shift+Tab", up.Stroke.ToString());
@@ -98,9 +110,10 @@ public class ConfigSerializerTests
     [Fact]
     public void WheelActions_RoundTrip()
     {
+        // 既定では Profiles[1] がブラウザ用（タブ切替の右+ホイールを持つ）
         var original = ClemotiusConfig.CreateDefault();
         var restored = ConfigSerializer.Deserialize(ConfigSerializer.Serialize(original));
-        var up = Assert.IsType<KeyAction>(restored.Profiles[0].WheelUp);
+        var up = Assert.IsType<KeyAction>(restored.Profiles[1].WheelUp);
         Assert.Equal("Ctrl+Shift+Tab", up.Stroke.ToString());
     }
 
