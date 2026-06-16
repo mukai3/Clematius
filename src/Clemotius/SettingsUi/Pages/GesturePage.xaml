@@ -48,85 +48,6 @@
                 IsEnabled="{Binding Gesture.SelectedIsRemovable}" />
         </Grid>
 
-        <!--  プロファイル編集フライアウト  -->
-        <Popup
-            x:Name="ProfileFlyout"
-            AllowsTransparency="True"
-            Placement="Bottom"
-            PlacementTarget="{Binding ElementName=EditProfileButton}"
-            StaysOpen="False">
-            <Border
-                Margin="8"
-                Padding="16"
-                Background="{DynamicResource ApplicationBackgroundBrush}"
-                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="8">
-                <Border.Effect>
-                    <DropShadowEffect
-                        BlurRadius="16"
-                        Opacity="0.4"
-                        ShadowDepth="4" />
-                </Border.Effect>
-                <StackPanel Width="260">
-                    <TextBlock
-                        Margin="0,0,0,12"
-                        FontWeight="SemiBold"
-                        Text="プロファイルの編集" />
-                    <TextBlock Margin="0,0,0,4" Opacity="0.8" Text="プロファイル名" />
-                    <TextBox
-                        x:Name="FlyoutName"
-                        Margin="0,0,0,8"
-                        TextChanged="OnFlyoutInputChanged" />
-                    <TextBlock Margin="0,0,0,4" Opacity="0.8" Text="対象プロセス (カンマ区切りで複数可)" />
-                    <Grid Margin="0,0,0,8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="8" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBox
-                            x:Name="FlyoutPattern"
-                            Grid.Column="0"
-                            TextChanged="OnFlyoutInputChanged" />
-                        <ui:Button
-                            x:Name="FlyoutPickButton"
-                            Grid.Column="2"
-                            Click="OnPickProfileProcesses"
-                            Content="選択..." />
-                    </Grid>
-                    <ui:ToggleSwitch
-                        x:Name="FlyoutEnabled"
-                        Margin="0,0,0,8"
-                        Content="ジェスチャーを有効にする" />
-                    <TextBlock
-                        x:Name="FlyoutError"
-                        Margin="0,0,0,8"
-                        Foreground="{DynamicResource SystemFillColorCriticalBrush}"
-                        TextWrapping="Wrap"
-                        Visibility="Collapsed" />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="8" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <ui:Button
-                            x:Name="FlyoutSave"
-                            Grid.Column="1"
-                            Appearance="Primary"
-                            Click="OnFlyoutSave"
-                            Content="保存" />
-                        <ui:Button
-                            Grid.Column="3"
-                            Click="OnFlyoutCancel"
-                            Content="キャンセル" />
-                    </Grid>
-                </StackPanel>
-            </Border>
-        </Popup>
-
         <!--  ジェスチャー一覧  -->
         <ListView
             x:Name="GestureList"
@@ -204,5 +125,92 @@
                     Content="変更..." />
             </Grid>
         </StackPanel>
+
+        <!--
+            プロファイル編集オーバーレイ。Popup は別 HWND になり、WinForms ループ上で
+            .Show() した WPF ウィンドウ配下ではキーボードフォーカスが渡らない（テキスト入力不可）。
+            同一ウィンドウ内に重ねて描画することでフォーカス問題を回避する。全行に重ねるため
+            最後の子として配置し、ルート Grid のマージン分は負マージンで打ち消す。
+        -->
+        <Grid
+            x:Name="ProfileEditorOverlay"
+            Grid.Row="0"
+            Grid.RowSpan="4"
+            Margin="-24,-16"
+            Background="#80000000"
+            Visibility="Collapsed">
+            <Border
+                Width="320"
+                Padding="16"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="{DynamicResource ApplicationBackgroundBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8">
+                <Border.Effect>
+                    <DropShadowEffect
+                        BlurRadius="16"
+                        Opacity="0.4"
+                        ShadowDepth="4" />
+                </Border.Effect>
+                <StackPanel>
+                    <TextBlock
+                        Margin="0,0,0,12"
+                        FontWeight="SemiBold"
+                        Text="プロファイルの編集" />
+                    <TextBlock Margin="0,0,0,4" Opacity="0.8" Text="プロファイル名" />
+                    <TextBox
+                        x:Name="FlyoutName"
+                        Margin="0,0,0,8"
+                        TextChanged="OnFlyoutInputChanged" />
+                    <TextBlock Margin="0,0,0,4" Opacity="0.8" Text="対象プロセス (カンマ区切りで複数可)" />
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox
+                            x:Name="FlyoutPattern"
+                            Grid.Column="0"
+                            TextChanged="OnFlyoutInputChanged" />
+                        <ui:Button
+                            x:Name="FlyoutPickButton"
+                            Grid.Column="2"
+                            Click="OnPickProfileProcesses"
+                            Content="選択..." />
+                    </Grid>
+                    <ui:ToggleSwitch
+                        x:Name="FlyoutEnabled"
+                        Margin="0,0,0,8"
+                        Content="ジェスチャーを有効にする" />
+                    <TextBlock
+                        x:Name="FlyoutError"
+                        Margin="0,0,0,8"
+                        Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                        TextWrapping="Wrap"
+                        Visibility="Collapsed" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:Button
+                            x:Name="FlyoutSave"
+                            Grid.Column="1"
+                            Appearance="Primary"
+                            Click="OnFlyoutSave"
+                            Content="保存" />
+                        <ui:Button
+                            Grid.Column="3"
+                            Click="OnFlyoutCancel"
+                            Content="キャンセル" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Grid>
     </Grid>
 </Page>

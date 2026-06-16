@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Threading;
 using Clemotius.SettingsUi.Dialogs;
 
 namespace Clemotius.SettingsUi.Pages;
@@ -39,8 +40,13 @@ public partial class GesturePage
         FlyoutEnabled.IsChecked = item.Model.GesturesEnabled;
         FlyoutError.Visibility = Visibility.Collapsed;
         FlyoutSave.IsEnabled = true;
-        ProfileFlyout.IsOpen = true;
-        FlyoutName.Focus();
+        ProfileEditorOverlay.Visibility = Visibility.Visible;
+        // Collapsed→Visible 直後はまだ配置前でフォーカスできないため、レイアウト後に設定する
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+        {
+            FlyoutName.Focus();
+            FlyoutName.SelectAll();
+        }));
     }
 
     private void OnFlyoutInputChanged(object sender, RoutedEventArgs e)
@@ -60,10 +66,11 @@ public partial class GesturePage
         if (GestureViewModel.ValidateProfileEdit(FlyoutName.Text, FlyoutPattern.Text) is not null)
             return; // 保存ボタンは無効化済みのはずだが念のため
         vm.ApplyProfileEdit(FlyoutName.Text, FlyoutPattern.Text, FlyoutEnabled.IsChecked == true);
-        ProfileFlyout.IsOpen = false;
+        ProfileEditorOverlay.Visibility = Visibility.Collapsed;
     }
 
-    private void OnFlyoutCancel(object sender, RoutedEventArgs e) => ProfileFlyout.IsOpen = false;
+    private void OnFlyoutCancel(object sender, RoutedEventArgs e)
+        => ProfileEditorOverlay.Visibility = Visibility.Collapsed;
 
     /// <summary>フライアウトの対象プロセスを、実行中アプリの選択ダイアログで設定する。</summary>
     private void OnPickProfileProcesses(object sender, RoutedEventArgs e)
