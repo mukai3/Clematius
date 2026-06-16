@@ -27,6 +27,10 @@ internal sealed class GestureWpfOverlay : Window
 
     public GestureWpfOverlay()
     {
+        // アプリ全体の暗黙 Window スタイル（WPF-UI テーマ）を継承しない。継承すると
+        // テーマ背景でウィンドウ全体が塗られ、透明オーバーレイが灰色全画面化してしまう。
+        Style = new Style(typeof(Window));
+
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = WpfBrushes.Transparent;
@@ -84,7 +88,12 @@ internal sealed class GestureWpfOverlay : Window
 
     public void AddPoint(int physX, int physY) => _line?.Points.Add(ToCanvas(physX, physY));
 
-    /// <summary>ジェスチャー終了。軌跡をクリアするのみ（ウィンドウは隠さない）。</summary>
+    /// <summary>
+    /// ジェスチャー終了。軌跡をクリアするのみ（ウィンドウは隠さない）。
+    /// Hide/Show するとレイヤードウィンドウが前回フレーム（前回の軌跡）を一瞬残すため、
+    /// 隠さず線だけ消す。空のキャンバスは透明なので画面には何も残らない（背景の灰色化は
+    /// 暗黙 Window スタイルを継承しないことで別途回避済み）。
+    /// </summary>
     public void End()
     {
         if (_line is not null)

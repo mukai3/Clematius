@@ -18,6 +18,9 @@ internal sealed class GestureCommandOverlay : Window
 
     public GestureCommandOverlay()
     {
+        // アプリ全体の暗黙 Window スタイル（WPF-UI テーマ）を継承しない（灰色全画面化の回避）。
+        Style = new Style(typeof(Window));
+
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = WpfBrushes.Transparent;
