@@ -13,27 +13,12 @@ public sealed record ClemotiusConfig
     public ScrollSettings Scroll { get; init; } = new();
     public TitlebarSettings Titlebar { get; init; } = new();
     public TraySettings Tray { get; init; } = new();
-    public IReadOnlyList<GestureProfile> Profiles { get; init; } = new[] { DefaultProfile(), DefaultBrowserProfile() };
+    public IReadOnlyList<GestureProfile> Profiles { get; init; } = new[] { DefaultBrowserProfile() };
 
     /// <summary>
-    /// 全アプリ共通のグローバルプロファイル。あらゆるアプリで使える「戻る/進む」のみを持つ。
-    /// ブラウザ専用の操作は <see cref="DefaultBrowserProfile"/> 側に分離する。
-    /// </summary>
-    public static GestureProfile DefaultProfile() => new()
-    {
-        Name = "Default",
-        ProcessPattern = "*",
-        GesturesEnabled = true,
-        Gestures = new[]
-        {
-            new GestureBinding("L", new AppCommandAction(AppCommand.BrowserBackward)),  // 戻る
-            new GestureBinding("R", new AppCommandAction(AppCommand.BrowserForward)),   // 進む
-        },
-    };
-
-    /// <summary>
-    /// 既定の Web ブラウザ用プロファイル（chrome / msedge）。タブ閉じ・再読込・先頭/末尾移動・
-    /// 右ボタン+ホイールでのタブ切替を持つ。戻る/進むはグローバルから継承される。
+    /// 既定の Web ブラウザ用プロファイル（chrome / msedge）。戻る/進む・タブ閉じ・再読込・
+    /// 先頭/末尾移動・右ボタン+ホイールでのタブ切替を持つ。グローバル既定は廃止したため、
+    /// 戻る/進む（L/R）もこのプロファイルに含める。
     /// </summary>
     public static GestureProfile DefaultBrowserProfile() => new()
     {
@@ -42,6 +27,8 @@ public sealed record ClemotiusConfig
         GesturesEnabled = true,
         Gestures = new[]
         {
+            new GestureBinding("L", new AppCommandAction(AppCommand.BrowserBackward)),  // 戻る
+            new GestureBinding("R", new AppCommandAction(AppCommand.BrowserForward)),   // 進む
             new GestureBinding("DR", new KeyAction(KeyStrokeParser.Parse("Ctrl+W"))),
             new GestureBinding("UDU", new KeyAction(KeyStrokeParser.Parse("Ctrl+F5"))),
             new GestureBinding("DUD", new KeyAction(KeyStrokeParser.Parse("Ctrl+F5"))),
@@ -53,6 +40,16 @@ public sealed record ClemotiusConfig
         // ユーザー ini の R+WU / R+WD（右ボタン+ホイール）由来
         WheelUp = new KeyAction(KeyStrokeParser.Parse("Ctrl+Shift+Tab")),   // 前のタブ
         WheelDown = new KeyAction(KeyStrokeParser.Parse("Ctrl+Tab")),       // 次のタブ
+    };
+
+    /// <summary>
+    /// per-app プロファイルのみモデルへの移行: 旧グローバル("*")プロファイルを取り除く。
+    /// マージ廃止により "*" は意味を持たない（どのプロセス名にも一致しない）ため、読込時に
+    /// 除去する。空になっても補充はしない（一致プロファイルが無ければジェスチャーは無効）。
+    /// </summary>
+    public ClemotiusConfig WithoutGlobalProfiles() => this with
+    {
+        Profiles = Profiles.Where(p => p.ProcessPattern.Trim() != "*").ToArray(),
     };
 
     public static ClemotiusConfig CreateDefault() => new();

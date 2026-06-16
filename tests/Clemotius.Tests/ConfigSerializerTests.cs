@@ -85,22 +85,26 @@ public class ConfigSerializerTests
     }
 
     [Fact]
-    public void DefaultProfile_HasOnlyBackForward()
+    public void DefaultProfiles_IsBrowserOnly()
     {
-        // グローバルはあらゆるアプリで使える戻る/進むのみ。ホイール割当は無し。
-        var profile = ClemotiusConfig.DefaultProfile();
-        Assert.Equal("*", profile.ProcessPattern);
-        Assert.Null(profile.WheelUp);
-        Assert.Null(profile.WheelDown);
-        Assert.Equal(new[] { "L", "R" }, profile.Gestures.Select(g => g.Strokes).ToArray());
+        // グローバル("*")は廃止。既定はブラウザ用プロファイル1件のみ。
+        var c = ClemotiusConfig.CreateDefault();
+        var profile = Assert.Single(c.Profiles);
+        Assert.Equal("ブラウザ", profile.Name);
+        Assert.Equal("chrome, msedge", profile.ProcessPattern);
+        Assert.DoesNotContain(c.Profiles, p => p.ProcessPattern.Trim() == "*");
     }
 
     [Fact]
-    public void DefaultBrowserProfile_TargetsBrowsersAndHasWheelTabSwitch()
+    public void DefaultBrowserProfile_HasBackForwardAndWheelTabSwitch()
     {
-        // R+WU=前のタブ / R+WD=次のタブ（ユーザー ini 由来）はブラウザ用プロファイルへ
+        // マージ廃止に伴い、戻る/進む(L/R)もブラウザプロファイルに含む。
+        // R+WU=前のタブ / R+WD=次のタブ（ユーザー ini 由来）も保持。
         var profile = ClemotiusConfig.DefaultBrowserProfile();
         Assert.Equal("chrome, msedge", profile.ProcessPattern);
+        var strokes = profile.Gestures.Select(g => g.Strokes).ToArray();
+        Assert.Contains("L", strokes);
+        Assert.Contains("R", strokes);
         var up = Assert.IsType<KeyAction>(profile.WheelUp);
         var down = Assert.IsType<KeyAction>(profile.WheelDown);
         Assert.Equal("Ctrl+Shift+Tab", up.Stroke.ToString());
@@ -110,10 +114,10 @@ public class ConfigSerializerTests
     [Fact]
     public void WheelActions_RoundTrip()
     {
-        // 既定では Profiles[1] がブラウザ用（タブ切替の右+ホイールを持つ）
+        // 既定では Profiles[0] がブラウザ用（タブ切替の右+ホイールを持つ）
         var original = ClemotiusConfig.CreateDefault();
         var restored = ConfigSerializer.Deserialize(ConfigSerializer.Serialize(original));
-        var up = Assert.IsType<KeyAction>(restored.Profiles[1].WheelUp);
+        var up = Assert.IsType<KeyAction>(restored.Profiles[0].WheelUp);
         Assert.Equal("Ctrl+Shift+Tab", up.Stroke.ToString());
     }
 
@@ -122,18 +126,48 @@ public class ConfigSerializerTests
     {
         var config = new ClemotiusConfig
         {
-            Profiles = new[] { new GestureProfile { Name = "T", ProcessPattern = "*" } },
+            Profiles = new[] { new GestureProfile { Name = "T", ProcessPattern = "test" } },
         };
         var restored = ConfigSerializer.Deserialize(ConfigSerializer.Serialize(config));
         Assert.Null(restored.Profiles[0].WheelUp);
         Assert.Null(restored.Profiles[0].WheelDown);
     }
 
+    [Fact]
+    public void Deserialize_DropsLegacyGlobalProfile()
+    {
+        // 旧モデルの "*" グローバルプロファイルは読込時に除去され、補充はしない。
+        var legacy = new ClemotiusConfig
+        {
+            Profiles = new[]
+            {
+                new GestureProfile { Name = "Default", ProcessPattern = "*" },
+                new GestureProfile { Name = "ブラウザ", ProcessPattern = "chrome" },
+            },
+        };
+        var json = ConfigSerializer.Serialize(legacy);
+        var restored = ConfigSerializer.Deserialize(json);
+        var profile = Assert.Single(restored.Profiles);
+        Assert.Equal("ブラウザ", profile.Name);
+    }
+
+    [Fact]
+    public void Deserialize_AllGlobalProfiles_ResultsInEmpty()
+    {
+        // "*" のみの設定は移行後 0 件になる（補充しない）。
+        var legacy = new ClemotiusConfig
+        {
+            Profiles = new[] { new GestureProfile { Name = "Default", ProcessPattern = "*" } },
+        };
+        var restored = ConfigSerializer.Deserialize(ConfigSerializer.Serialize(legacy));
+        Assert.Empty(restored.Profiles);
+    }
+
     private static ClemotiusConfig WithGesture(GestureBinding binding) => new()
     {
         Profiles = new[]
         {
-            new GestureProfile { Name = "T", ProcessPattern = "*", Gestures = new[] { binding } },
+            new GestureProfile { Name = "T", ProcessPattern = "test", Gestures = new[] { binding } },
         },
     };
 

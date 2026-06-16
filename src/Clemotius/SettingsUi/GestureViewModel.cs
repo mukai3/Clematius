@@ -13,8 +13,6 @@ internal sealed partial class ProfileItemViewModel : ObservableObject
 
     [ObservableProperty] private string _displayName;
 
-    public bool IsGlobal => Model.IsGlobal;
-
     public ProfileItemViewModel(MutableProfile model)
     {
         Model = model;
@@ -24,9 +22,7 @@ internal sealed partial class ProfileItemViewModel : ObservableObject
     public void RefreshDisplay() => DisplayName = DisplayOf(Model);
 
     private static string DisplayOf(MutableProfile p)
-        => p.IsGlobal
-            ? $"{p.Name} (すべてのアプリ)"
-            : $"{p.Name} ({(string.IsNullOrWhiteSpace(p.ProcessPattern) ? "未割当" : p.ProcessPattern)})";
+        => $"{p.Name} ({(string.IsNullOrWhiteSpace(p.ProcessPattern) ? "未割当" : p.ProcessPattern)})";
 }
 
 /// <summary>ジェスチャー一覧の1行（矢印表記＋アクション説明）。</summary>
@@ -56,37 +52,13 @@ internal sealed partial class GestureViewModel : ObservableObject
     [ObservableProperty] private string _wheelDownText = "(なし)";
     [ObservableProperty] private bool _selectedIsRemovable;
 
-    /// <summary>
-    /// ジェスチャーを無効にする（アプリ側へ右ボタンを透過する）プロセス名。プロファイル非依存の
-    /// 全体設定で、プロファイルの対象プロセスと同じくカンマ区切りで複数指定する。
-    /// </summary>
-    [ObservableProperty] private string _excludedProcessesText = "";
-
-    partial void OnExcludedProcessesTextChanged(string value) => _changed();
-
-    public GestureViewModel(
-        IEnumerable<GestureProfile> profiles, IEnumerable<string> excludedProcesses, Action changed)
+    public GestureViewModel(IEnumerable<GestureProfile> profiles, Action changed)
     {
         _changed = changed;
 
-        var list = profiles.Select(MutableProfile.From).ToList();
-        NormalizeGlobalProfile(list);
-        foreach (var p in list)
+        foreach (var p in profiles.Select(MutableProfile.From))
             Profiles.Add(new ProfileItemViewModel(p));
-        SelectedProfile = Profiles[0];
-
-        // バッキングフィールドへ直接代入して初期化時の変更通知（保存）を抑止する
-        _excludedProcessesText = string.Join(", ", excludedProcesses);
-    }
-
-    /// <summary>グローバル("*")プロファイルを1つだけ先頭に固定する（旧画面と同じ規則）。</summary>
-    private static void NormalizeGlobalProfile(List<MutableProfile> list)
-    {
-        var global = list.FirstOrDefault(p => p.IsGlobal)
-            ?? new MutableProfile { Name = MutableProfile.GlobalName, ProcessPattern = "*" };
-        global.Name = MutableProfile.GlobalName;
-        list.RemoveAll(p => p.IsGlobal);
-        list.Insert(0, global);
+        SelectedProfile = Profiles.FirstOrDefault();
     }
 
     partial void OnSelectedProfileChanged(ProfileItemViewModel? value) => RefreshFromSelected();
@@ -102,7 +74,7 @@ internal sealed partial class GestureViewModel : ObservableObject
         }
         foreach (var g in item.Model.Gestures)
             Gestures.Add(new GestureRowViewModel(g));
-        SelectedIsRemovable = !item.IsGlobal;
+        SelectedIsRemovable = true;
         RefreshWheelTexts();
     }
 
@@ -126,20 +98,20 @@ internal sealed partial class GestureViewModel : ObservableObject
 
     public void RemoveSelectedProfile()
     {
-        if (SelectedProfile is not { IsGlobal: false } item)
+        if (SelectedProfile is not { } item)
             return;
         Profiles.Remove(item);
-        SelectedProfile = Profiles[0];
+        SelectedProfile = Profiles.FirstOrDefault();
         _changed();
     }
 
     /// <summary>フライアウトの入力値を検証する。問題なければ null、あればエラーメッセージ。</summary>
-    public static string? ValidateProfileEdit(string name, string processPattern, bool isGlobal)
+    public static string? ValidateProfileEdit(string name, string processPattern)
     {
         if (string.IsNullOrWhiteSpace(name))
             return "プロファイル名を入力してください。";
-        if (!isGlobal && processPattern.Trim() == "*")
-            return "「*」(すべてのアプリ) はグローバルプロファイル専用です。";
+        if (string.IsNullOrWhiteSpace(processPattern))
+            return "対象プロセスを入力してください。";
         return null;
     }
 
@@ -148,11 +120,8 @@ internal sealed partial class GestureViewModel : ObservableObject
     {
         if (SelectedProfile is not { } item)
             return;
-        if (!item.IsGlobal)
-        {
-            item.Model.Name = name.Trim();
-            item.Model.ProcessPattern = processPattern.Trim();
-        }
+        item.Model.Name = name.Trim();
+        item.Model.ProcessPattern = processPattern.Trim();
         item.Model.GesturesEnabled = gesturesEnabled;
         item.RefreshDisplay();
         _changed();
@@ -203,12 +172,6 @@ internal sealed partial class GestureViewModel : ObservableObject
         RefreshWheelTexts();
         _changed();
     }
-
-    /// <summary>
-    /// Build() 用: カンマ区切りの除外テキストを正規化済みプロセス名の配列にする。
-    /// 空要素を除き、大文字小文字を無視して重複を取り除く。
-    /// </summary>
-    public string[] BuildExcludedProcesses() => ProcessNameList.Parse(ExcludedProcessesText).ToArray();
 
     /// <summary>Build() 用: 現在の編集状態からプロファイル配列を構築する。</summary>
     public GestureProfile[] BuildProfiles() => Profiles.Select(p => p.Model.ToProfile()).ToArray();

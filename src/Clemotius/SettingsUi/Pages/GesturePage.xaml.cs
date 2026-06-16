@@ -35,10 +35,7 @@ public partial class GesturePage
         if (Vm?.SelectedProfile is not { } item)
             return;
         FlyoutName.Text = item.Model.Name;
-        FlyoutPattern.Text = item.IsGlobal ? "(すべてのアプリ)" : item.Model.ProcessPattern;
-        FlyoutName.IsEnabled = !item.IsGlobal;
-        FlyoutPattern.IsEnabled = !item.IsGlobal;
-        FlyoutPickButton.IsEnabled = !item.IsGlobal;
+        FlyoutPattern.Text = item.Model.ProcessPattern;
         FlyoutEnabled.IsChecked = item.Model.GesturesEnabled;
         FlyoutError.Visibility = Visibility.Collapsed;
         FlyoutSave.IsEnabled = true;
@@ -48,11 +45,9 @@ public partial class GesturePage
 
     private void OnFlyoutInputChanged(object sender, RoutedEventArgs e)
     {
-        if (Vm?.SelectedProfile is not { } item)
+        if (Vm?.SelectedProfile is null)
             return;
-        string? error = item.IsGlobal
-            ? null
-            : GestureViewModel.ValidateProfileEdit(FlyoutName.Text, FlyoutPattern.Text, item.IsGlobal);
+        string? error = GestureViewModel.ValidateProfileEdit(FlyoutName.Text, FlyoutPattern.Text);
         FlyoutError.Text = error ?? "";
         FlyoutError.Visibility = error is null ? Visibility.Collapsed : Visibility.Visible;
         FlyoutSave.IsEnabled = error is null;
@@ -60,13 +55,10 @@ public partial class GesturePage
 
     private void OnFlyoutSave(object sender, RoutedEventArgs e)
     {
-        if (Vm is not { SelectedProfile: { } item } vm)
+        if (Vm is not { SelectedProfile: not null } vm)
             return;
-        if (!item.IsGlobal &&
-            GestureViewModel.ValidateProfileEdit(FlyoutName.Text, FlyoutPattern.Text, item.IsGlobal) is not null)
-        {
+        if (GestureViewModel.ValidateProfileEdit(FlyoutName.Text, FlyoutPattern.Text) is not null)
             return; // 保存ボタンは無効化済みのはずだが念のため
-        }
         vm.ApplyProfileEdit(FlyoutName.Text, FlyoutPattern.Text, FlyoutEnabled.IsChecked == true);
         ProfileFlyout.IsOpen = false;
     }
@@ -82,16 +74,6 @@ public partial class GesturePage
             FlyoutPattern.Text = dlg.Result; // TextChanged 経由で検証・保存ボタン状態を更新
             FlyoutPattern.Focus();
         }
-    }
-
-    /// <summary>ジェスチャーを無効にするアプリを、実行中アプリの選択ダイアログで設定する。</summary>
-    private void OnPickExcludedProcesses(object sender, RoutedEventArgs e)
-    {
-        if (Vm is not { } vm)
-            return;
-        var dlg = new ProcessPickerDialog(vm.ExcludedProcessesText) { Owner = OwnerWindow };
-        if (dlg.ShowDialog() == true)
-            vm.ExcludedProcessesText = dlg.Result;
     }
 
     // ── ジェスチャー一覧 ──

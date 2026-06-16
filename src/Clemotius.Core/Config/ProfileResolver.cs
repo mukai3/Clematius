@@ -1,13 +1,11 @@
-using Clemotius.Core.Gestures;
-
 namespace Clemotius.Core.Config;
 
 /// <summary>
 /// 前面アプリのプロセス名から適用プロファイルを決定する。Win32 非依存。
-/// マッチ規則: ProcessPattern がワイルドカード "*" 以外で、プロセス名に
-/// （拡張子 .exe を無視して）一致するものを優先。ProcessPattern はカンマ区切りで
-/// 複数のプロセス名を指定でき、いずれかに一致すれば該当（例 "chrome, edge, brave"）。
-/// 複数プロファイルが該当する場合は定義順で先勝ち。該当が無ければ "*"（既定）。
+/// マッチ規則: ProcessPattern（拡張子 .exe を無視）にプロセス名が一致する先頭プロファイルを返す。
+/// ProcessPattern はカンマ区切りで複数のプロセス名を指定でき、いずれかに一致すれば該当
+/// （例 "chrome, edge, brave"）。一致するプロファイルが無ければ null（＝ジェスチャー無効）。
+/// グローバル既定（旧 "*" プロファイル）は廃止し、明示プロファイルに一致したアプリだけで有効。
 /// </summary>
 public sealed class ProfileResolver
 {
@@ -21,54 +19,15 @@ public sealed class ProfileResolver
     public GestureProfile? Resolve(string? processName)
     {
         string name = NormalizeProcess(processName);
+        if (name.Length == 0)
+            return null;
 
-        GestureProfile? wildcard = null;
         foreach (var p in _profiles)
         {
-            if (p.ProcessPattern == "*")
-            {
-                wildcard ??= p; // 最初の "*" を既定として温存
-                continue;
-            }
             if (Matches(p.ProcessPattern, name))
-                return p; // 具体的なパターンを優先
+                return p;
         }
-        return wildcard;
-    }
-
-    /// <summary>
-    /// グローバル("*")プロファイルをベースに、アプリ別プロファイルをマージした
-    /// 「実効プロファイル」を返す。アプリ別が同じストロークを定義していれば上書きし、
-    /// 右+ホイールはアプリ別が未設定ならグローバルを引き継ぐ。GesturesEnabled は
-    /// アプリ別が一致すればアプリ別を、無ければグローバルを採用する。
-    /// </summary>
-    public GestureProfile? ResolveEffective(string? processName)
-    {
-        string name = NormalizeProcess(processName);
-        GestureProfile? global = null;
-        GestureProfile? specific = null;
-        foreach (var p in _profiles)
-        {
-            if (p.ProcessPattern == "*")
-                global ??= p;
-            else if (specific is null && Matches(p.ProcessPattern, name))
-                specific = p;
-        }
-
-        if (specific is null) return global;
-        if (global is null) return specific;
-
-        // グローバルのジェスチャーをベースに、アプリ別で上書き・追加
-        var merged = new Dictionary<string, GestureBinding>(StringComparer.Ordinal);
-        foreach (var g in global.Gestures) merged[g.Strokes] = g;
-        foreach (var g in specific.Gestures) merged[g.Strokes] = g;
-
-        return specific with
-        {
-            Gestures = merged.Values.ToArray(),
-            WheelUp = specific.WheelUp ?? global.WheelUp,
-            WheelDown = specific.WheelDown ?? global.WheelDown,
-        };
+        return null;
     }
 
     private static bool Matches(string pattern, string processName)

@@ -31,6 +31,10 @@ public static class ConfigSerializer
     public static ClemotiusConfig Deserialize(string json)
     {
         var config = JsonSerializer.Deserialize<ClemotiusConfig>(json, Options);
-        return config ?? throw new JsonException("設定の逆シリアライズ結果が null です。");
+        if (config is null)
+            throw new JsonException("設定の逆シリアライズ結果が null です。");
+        // 旧モデル（グローバル"*"プロファイル＋除外リスト）からの移行: "*" を取り除く。
+        // 旧 excludedProcesses は未知プロパティとして自動的に無視される。
+        return config.WithoutGlobalProfiles();
     }
 }

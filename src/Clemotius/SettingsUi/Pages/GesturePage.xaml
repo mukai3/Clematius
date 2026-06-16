@@ -10,7 +10,6 @@
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!--  プロファイルバー  -->
@@ -203,35 +202,6 @@
                     Grid.Column="2"
                     Click="OnEditWheelDown"
                     Content="変更..." />
-            </Grid>
-        </StackPanel>
-
-        <!--  ジェスチャーを無効にするアプリ（全プロファイル共通）  -->
-        <StackPanel Grid.Row="4" Margin="0,16,0,0">
-            <TextBlock
-                Margin="0,0,0,4"
-                FontSize="16"
-                FontWeight="SemiBold"
-                Text="ジェスチャーを無効にするアプリ" />
-            <TextBlock
-                Margin="0,0,0,8"
-                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                TextWrapping="Wrap"
-                Text="登録したアプリでは右ボタンをアプリ側へ透過し、アプリ独自のマウスジェスチャーをそのまま使えます（プロファイルに関わらず共通。カンマ区切りで複数指定可。例: JaneStyle, mintty）。" />
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="8" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <ui:TextBox
-                    Grid.Column="0"
-                    PlaceholderText="カンマ区切りで複数可（例: JaneStyle, mintty）"
-                    Text="{Binding Gesture.ExcludedProcessesText, UpdateSourceTrigger=PropertyChanged}" />
-                <ui:Button
-                    Grid.Column="2"
-                    Click="OnPickExcludedProcesses"
-                    Content="選択..." />
             </Grid>
         </StackPanel>
     </Grid>

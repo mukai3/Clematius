@@ -15,27 +15,12 @@ internal sealed class ActiveConfigProvider : IGestureContextProvider
     private readonly object _gate = new();
     private ClemotiusConfig _config;
     private ProfileResolver _resolver;
-    private HashSet<string> _excluded;
     private readonly Dictionary<string, GestureMatcher> _matcherCache = new();
 
     public ActiveConfigProvider(ClemotiusConfig config)
     {
         _config = config;
         _resolver = new ProfileResolver(config.Profiles);
-        _excluded = BuildExcluded(config);
-    }
-
-    // 除外プロセス名を正規化した集合にする（大文字小文字・拡張子を無視して照合）
-    private static HashSet<string> BuildExcluded(ClemotiusConfig config)
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var name in config.Gesture.ExcludedProcesses)
-        {
-            string n = ProcessName.Normalize(name);
-            if (n.Length > 0)
-                set.Add(n);
-        }
-        return set;
     }
 
     public int Range
@@ -54,7 +39,6 @@ internal sealed class ActiveConfigProvider : IGestureContextProvider
         {
             _config = config;
             _resolver = new ProfileResolver(config.Profiles);
-            _excluded = BuildExcluded(config);
             _matcherCache.Clear();
         }
     }
@@ -74,18 +58,27 @@ internal sealed class ActiveConfigProvider : IGestureContextProvider
 
         string? process = ProcessNameResolver.FromWindow(target);
 
+        // リゾルバをスナップショットし、一致プロファイルだけを対象に項目判定を行う
+        // （MSAA 呼び出しは ~30ms 掛かりうるため、ロックの外で実行する）
+        ProfileResolver resolver;
+        lock (_gate)
+            resolver = _resolver;
+
+        // 一致するプロファイルが無いアプリ（旧グローバルの代替）では右ボタンを
+        // 完全にアプリ側へ透過する（ジェスチャーを起動しない）
+        var profile = resolver.Resolve(process);
+        if (profile is null)
+            return null;
+        if (!profile.GesturesEnabled)
+            return new GestureContext(EmptyMatcher, Enabled: false, WheelUp: null, WheelDown: null);
+
+        // ファイル/フォルダ等の項目の上では右ボタンをアプリへ透過し、アプリ独自の右ドラッグを保つ。
+        // 項目の無い背景上ではジェスチャーを扱う（エクスプローラ等での両立）。
+        if (RightDragItemDetector.IsOverDraggableItem(startX, startY))
+            return null;
+
         lock (_gate)
         {
-            // 除外登録アプリでは右ボタンを完全にアプリ側へ透過する（ジェスチャーを起動しない）
-            if (process is not null && _excluded.Contains(ProcessName.Normalize(process)))
-                return null;
-
-            var profile = _resolver.ResolveEffective(process);
-            if (profile is null)
-                return null;
-            if (!profile.GesturesEnabled)
-                return new GestureContext(EmptyMatcher, Enabled: false, WheelUp: null, WheelDown: null);
-
             if (!_matcherCache.TryGetValue(profile.Name, out var matcher))
             {
                 matcher = new GestureMatcher(profile.Gestures);
