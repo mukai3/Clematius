@@ -78,6 +78,9 @@ internal static class InputNative
 
     public const uint WM_HSCROLL = 0x0114;
     public const uint WM_VSCROLL = 0x0115;
+    public const uint WM_MOUSEWHEEL = 0x020A;
+    public const uint WM_MOUSEHWHEEL = 0x020E;
+    public const int WHEEL_DELTA = 120;
     // スクロールバー通知コード（水平/垂直で同値）
     public const int SB_LINEBACK = 0;   // 上/左へ1行(列)
     public const int SB_LINEFWD = 1;    // 下/右へ1行(列)

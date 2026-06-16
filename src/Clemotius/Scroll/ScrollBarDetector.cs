@@ -30,10 +30,19 @@ internal static class ScrollBarDetector
     // 長くブロックしうるため、連続ホイール中は近傍・短時間の結果を再利用する。
     // 参照の差し替えがアトミックになるよう不変レコードで保持する
     // （フックスレッドとバックグラウンド検出スレッドの両方から書くため）。
-    private sealed record CacheEntry(int X, int Y, ScrollBarHit Hit, nint Target, uint Tick);
+    // Wheel=true は「対象が WM_VSCROLL を受け付けないカスタムバー（Excel 等の MSAA 検出分）なので、
+    // WM_MOUSEWHEEL/WM_MOUSEHWHEEL で送る」ことを示す。標準バー/Chromium(UIA) は false（WM_SCROLL）。
+    private sealed record CacheEntry(int X, int Y, ScrollBarHit Hit, nint Target, bool Wheel, uint Tick);
 
     private static volatile CacheEntry? _cache;
     private static int _probing; // MSAA/UIA バックグラウンド検出の多重起動防止 (0/1)
+
+    // 直近にカスタムバー（MSAA/UIA）と判定した窓を覚えておく。非同期検出が間に合わない
+    // 新規/キャッシュ切れのホイールでも、同じ窓なら前回の軸で確定して「素通し（＝誤軸スクロール、
+    // 例: 横バー上で縦に動く）」を防ぐ。フックを止めないため同期 MSAA は使わない。
+    private sealed record CustomHit(nint Hwnd, ScrollBarHit Hit, bool Wheel, uint Tick);
+    private static volatile CustomHit? _lastCustom;
+    private const uint CustomMemoryMs = 2000;
 
     /// <summary>
     /// カーソル直下のスクロールバーの向きと、スクロールメッセージの送出先ウィンドウを返す。
@@ -45,24 +54,24 @@ internal static class ScrollBarDetector
     /// タイムアウトなしの同期呼び出しは、高負荷アプリ（画像ビューアの読み込み中等）で
     /// フックごと固まり、入力キュー溢れ＝連続ビープ音の原因になる。
     /// </summary>
-    public static (ScrollBarHit hit, nint target) Detect(int x, int y)
+    public static (ScrollBarHit hit, nint target, bool wheel) Detect(int x, int y)
     {
         var c = _cache;
         uint now = (uint)Environment.TickCount;
         if (c is not null && now - c.Tick < 250 && Math.Abs(x - c.X) < 8 && Math.Abs(y - c.Y) < 8)
-            return (c.Hit, c.Target);
+            return (c.Hit, c.Target, c.Wheel);
 
         var pt = new NativeMethods.POINT { X = x, Y = y };
         nint hwnd = InputNative.WindowFromPoint(pt);
         if (hwnd == 0)
-            return Store(x, y, ScrollBarHit.None, 0);
+            return Store(x, y, ScrollBarHit.None, 0, false);
 
         // 1) 単独スクロールバー コントロール → 親ウィンドウへ送る
         if (GetClassName(hwnd).Equals("ScrollBar", StringComparison.OrdinalIgnoreCase))
         {
             int style = InputNative.GetWindowLongW(hwnd, GWL_STYLE);
             var dir = (style & SBS_VERT) != 0 ? ScrollBarHit.Vertical : ScrollBarHit.Horizontal;
-            return Store(x, y, dir, hwnd);
+            return Store(x, y, dir, hwnd, false);
         }
 
         // 2) 非クライアントの標準スクロールバー: 30ms 打ち切りでヒットテスト
@@ -72,44 +81,129 @@ internal static class ScrollBarDetector
                 InputNative.SMTO_ABORTIFHUNG, 30, out nint hit) == 0)
         {
             // 応答しない相手には MSAA/UIA も掛けない
-            return Store(x, y, ScrollBarHit.None, 0);
+            return Store(x, y, ScrollBarHit.None, 0, false);
         }
         switch ((int)hit)
         {
             case InputNative.HTHSCROLL:
-                return Store(x, y, ScrollBarHit.Horizontal, hwnd);
+                return Store(x, y, ScrollBarHit.Horizontal, hwnd, false);
             case InputNative.HTVSCROLL:
-                return Store(x, y, ScrollBarHit.Vertical, hwnd);
+                return Store(x, y, ScrollBarHit.Vertical, hwnd, false);
         }
 
         // 3)+4) カスタム描画スクロールバー（MSAA → UIA）: 相手プロセス次第で
         // 数秒ブロックしうるため、フックスレッドでは待たずに別スレッドで計算して
         // キャッシュへ反映する。完了までは暫定で「スクロールバーでない」をキャッシュし、
         // 連続ホイール中の NCHITTEST 再実行（30ms×N）も防ぐ。
-        if (Interlocked.CompareExchange(ref _probing, 1, 0) == 0)
-        {
-            Task.Run(() =>
-            {
-                try
-                {
-                    var r = DetectByMsaaCore(x, y);
-                    if (r.hit == ScrollBarHit.None)
-                        r = DetectByUia(x, y, hwnd);
-                    _cache = new CacheEntry(x, y, r.hit, r.target, (uint)Environment.TickCount);
-                }
-                finally
-                {
-                    Volatile.Write(ref _probing, 0);
-                }
-            });
-        }
-        return Store(x, y, ScrollBarHit.None, 0); // 暫定値（プローブ完了時に上書きされる）
+        KickProbe(x, y, hwnd);
+
+        // 非同期検出が間に合わない間も、同じ窓を直近カスタムバーと判定済みなら前回の軸で確定する。
+        // これにより横スクロールバー上で素通しの縦スクロールが混ざるのを防ぐ。送出先はこの窓でよい
+        // （ホイール送出はどの窓でも有効なことを実測確認済み）。
+        var lc = _lastCustom;
+        if (lc is not null && lc.Hwnd == hwnd && now - lc.Tick < CustomMemoryMs && lc.Hit != ScrollBarHit.None)
+            return Store(x, y, lc.Hit, hwnd, lc.Wheel);
+
+        return Store(x, y, ScrollBarHit.None, 0, false); // 暫定値（プローブ完了時に上書きされる）
     }
 
-    private static (ScrollBarHit hit, nint target) Store(int x, int y, ScrollBarHit hit, nint target)
+    // スクロールバー窓（NUIScrollbar 等）はこの太さ以下の細い窓になることが多い。
+    private const int ScrollbarWindowThickness = 26;
+
+    /// <summary>
+    /// マウス移動中の事前検出（ホバー先読み）。カスタムスクロールバーらしい「細い窓」の上だけ
+    /// バックグラウンドで検出してキャッシュを温め、直後のホイールが最初の1ノッチから正しい軸で
+    /// 動くようにする（プロセス外フックでは同期 MSAA が使えないための代替）。フックスレッドでは
+    /// WindowFromPoint/GetWindowRect（ローカルで安全）しか行わない。
+    /// </summary>
+    public static void Prime(int x, int y)
     {
-        _cache = new CacheEntry(x, y, hit, target, (uint)Environment.TickCount);
-        return (hit, target);
+        var c = _cache;
+        uint now = (uint)Environment.TickCount;
+        if (c is not null && now - c.Tick < 250 && Math.Abs(x - c.X) < 8 && Math.Abs(y - c.Y) < 8)
+            return; // 近傍に新しい結果あり
+        if (Volatile.Read(ref _probing) != 0)
+            return; // 既に検出中
+
+        nint hwnd = InputNative.WindowFromPoint(new NativeMethods.POINT { X = x, Y = y });
+        if (hwnd == 0 || !InputNative.GetWindowRect(hwnd, out var r))
+            return;
+        if (Math.Min(r.Right - r.Left, r.Bottom - r.Top) > ScrollbarWindowThickness)
+            return; // 細くない＝カスタムスクロールバー窓ではない（通常窓上では先読みしない）
+
+        KickProbe(x, y, hwnd);
+    }
+
+    // カスタム描画スクロールバー（MSAA → UIA）をバックグラウンドで検出してキャッシュへ反映する。
+    // フックスレッドを止めないため必ず別スレッドで実行する（単発ガード付き）。
+    private static void KickProbe(int x, int y, nint hwnd)
+    {
+        if (Interlocked.CompareExchange(ref _probing, 1, 0) != 0)
+            return;
+        Task.Run(() =>
+        {
+            try
+            {
+                // 3) MSAA カスタムバー（Excel 等）は WM_VSCROLL を受け付けないため WM_MOUSEWHEEL で送る
+                var m = DetectByMsaaCore(x, y);
+                if (m.hit != ScrollBarHit.None)
+                {
+                    uint t = (uint)Environment.TickCount;
+                    _cache = new CacheEntry(x, y, m.hit, m.target, true, t);
+                    _lastCustom = new CustomHit(hwnd, m.hit, true, t);
+                }
+                else
+                {
+                    // 4) UIA（Chromium 等）は WM_VSCROLL/WM_HSCROLL がそのまま有効
+                    var u = DetectByUia(x, y, hwnd);
+                    uint t = (uint)Environment.TickCount;
+                    _cache = new CacheEntry(x, y, u.hit, u.target, false, t);
+                    if (u.hit != ScrollBarHit.None)
+                        _lastCustom = new CustomHit(hwnd, u.hit, false, t);
+                }
+            }
+            finally
+            {
+                Volatile.Write(ref _probing, 0);
+            }
+        });
+    }
+
+    /// <summary>
+    /// 切り分け用: カーソル直下の各検出段（クラス名 / NCHITTEST / MSAA / UIA）の結果を1行にまとめる。
+    /// クロスプロセス呼び出しを含むため必ずバックグラウンドで呼ぶこと（フックスレッド禁止）。
+    /// </summary>
+    public static string Describe(int x, int y)
+    {
+        var pt = new NativeMethods.POINT { X = x, Y = y };
+        nint hwnd = InputNative.WindowFromPoint(pt);
+        if (hwnd == 0)
+            return $"pos=({x},{y}) window=(none)";
+
+        string cls = GetClassName(hwnd);
+        int style = InputNative.GetWindowLongW(hwnd, GWL_STYLE);
+
+        string nchit = "-";
+        nint lParam = unchecked((nint)((y << 16) | (x & 0xFFFF)));
+        if (InputNative.SendMessageTimeoutW(
+                hwnd, InputNative.WM_NCHITTEST, 0, lParam,
+                InputNative.SMTO_ABORTIFHUNG, 30, out nint hit) != 0)
+        {
+            nchit = ((int)hit).ToString();
+        }
+
+        var msaa = DetectByMsaaCore(x, y);
+        var uia = DetectByUia(x, y, hwnd);
+
+        return $"pos=({x},{y}) class={cls} style=0x{style:X} nchit={nchit} " +
+               $"msaa={msaa.hit} uia={uia.hit}";
+    }
+
+    private static (ScrollBarHit hit, nint target, bool wheel) Store(
+        int x, int y, ScrollBarHit hit, nint target, bool wheel)
+    {
+        _cache = new CacheEntry(x, y, hit, target, wheel, (uint)Environment.TickCount);
+        return (hit, target, wheel);
     }
 
     private const int ROLE_SYSTEM_SCROLLBAR = 3;

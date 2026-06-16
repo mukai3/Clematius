@@ -31,6 +31,11 @@ internal sealed class InputRouter
     /// <returns>true ならイベントを飲み込む</returns>
     public bool OnMouse(int message, NativeMethods.MSLLHOOKSTRUCT data)
     {
+        // スクロールバー上のホイールが最初の1ノッチから正しく動くよう、移動中に事前検出して温める
+        // （細い窓＝カスタムバーの上だけ実行。プロセス外フックで同期検出できないことの代替）
+        if (message == NativeMethods.WM_MOUSEMOVE)
+            ScrollBarDetector.Prime(data.pt.X, data.pt.Y);
+
         if (_titlebar.OnMouse(message, data))
             return true;
 
