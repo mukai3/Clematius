@@ -1,6 +1,8 @@
 bin/
 obj/
 *.user
+*.lnk
+TASK.md
 .vs/
 .claude/
 # ブレインストーミング用モックアップ（一時ファイル）
@@ -17,6 +19,7 @@ Kazasub.dll
 Kazawow64.exe
 hook/
 ReadMe.txt
+MGLahk
 
 # 個人設定ファイル（解析の参考資料）
 Kazaguru.ini
