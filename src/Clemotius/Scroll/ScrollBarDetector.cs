@@ -35,7 +35,13 @@ internal static class ScrollBarDetector
     private sealed record CacheEntry(int X, int Y, ScrollBarHit Hit, nint Target, bool Wheel, uint Tick);
 
     private static volatile CacheEntry? _cache;
-    private static int _probing; // MSAA/UIA バックグラウンド検出の多重起動防止 (0/1)
+
+    // MSAA/UIA バックグラウンド検出のリース (0=空き、それ以外=開始tick)。MSAA/UIA が相手プロセス
+    // 都合で長時間戻らないと、単純な 0/1 ガードでは解放されず以後の検出が永久に起動しなくなる。
+    // ProbeMaxMs を超えたリースは「詰まった」とみなして新しい検出が奪えるようにし、検出が
+    // グローバルに固まるのを防ぐ。
+    private static uint _probeLease;
+    private const uint ProbeMaxMs = 1000;
 
     // 直近にカスタムバー（MSAA/UIA）と判定した窓を覚えておく。非同期検出が間に合わない
     // 新規/キャッシュ切れのホイールでも、同じ窓なら前回の軸で確定して「素通し（＝誤軸スクロール、
@@ -122,8 +128,8 @@ internal static class ScrollBarDetector
         uint now = (uint)Environment.TickCount;
         if (c is not null && now - c.Tick < 250 && Math.Abs(x - c.X) < 8 && Math.Abs(y - c.Y) < 8)
             return; // 近傍に新しい結果あり
-        if (Volatile.Read(ref _probing) != 0)
-            return; // 既に検出中
+        if (ProbeBusy())
+            return; // 既に検出中（期限内）
 
         nint hwnd = InputNative.WindowFromPoint(new NativeMethods.POINT { X = x, Y = y });
         if (hwnd == 0 || !InputNative.GetWindowRect(hwnd, out var r))
@@ -138,7 +144,8 @@ internal static class ScrollBarDetector
     // フックスレッドを止めないため必ず別スレッドで実行する（単発ガード付き）。
     private static void KickProbe(int x, int y, nint hwnd)
     {
-        if (Interlocked.CompareExchange(ref _probing, 1, 0) != 0)
+        uint lease = TryAcquireProbe();
+        if (lease == 0)
             return;
         Task.Run(() =>
         {
@@ -164,9 +171,35 @@ internal static class ScrollBarDetector
             }
             finally
             {
-                Volatile.Write(ref _probing, 0);
+                ReleaseProbe(lease);
             }
         });
+    }
+
+    // MSAA/UIA バックグラウンド検出のリースを取得する。空き、または期限超過で詰まったリースを
+    // 奪えたらその開始 tick（解放用トークン、0 は使わない）を返す。取れなければ 0。
+    private static uint TryAcquireProbe()
+    {
+        uint now = (uint)Environment.TickCount;
+        if (now == 0) now = 1; // 0 は「空き」を表すので避ける
+        while (true)
+        {
+            uint cur = Volatile.Read(ref _probeLease);
+            if (cur != 0 && now - cur < ProbeMaxMs)
+                return 0; // 実行中かつ期限内
+            if (Interlocked.CompareExchange(ref _probeLease, now, cur) == cur)
+                return now; // 空き、または期限超過のリースを奪った
+        }
+    }
+
+    // 自分のリースのままなら解放する。期限超過で横取りされていたら触らない。
+    private static void ReleaseProbe(uint myToken)
+        => Interlocked.CompareExchange(ref _probeLease, 0, myToken);
+
+    private static bool ProbeBusy()
+    {
+        uint cur = Volatile.Read(ref _probeLease);
+        return cur != 0 && (uint)Environment.TickCount - cur < ProbeMaxMs;
     }
 
     /// <summary>

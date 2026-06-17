@@ -12,8 +12,11 @@ internal sealed class MouseHook : LowLevelHook
     protected override unsafe bool Handle(nint wParam, nint lParam)
     {
         ref readonly var data = ref *(NativeMethods.MSLLHOOKSTRUCT*)lParam;
-        // 自分が注入したイベントは判定対象にしない（無限ループ防止／生存プローブ）
-        if ((data.flags & NativeMethods.LLMHF_INJECTED) != 0)
+        // 自分が注入したイベントだけを判定対象から除外する（無限ループ防止／生存プローブ）。
+        // 以前は LLMHF_INJECTED で「あらゆる注入入力」を無視していたが、それだと AutoHotkey や
+        // PowerToys 等の支援ツール由来の入力までジェスチャー対象外になり相互運用性を損なう。
+        // 自前注入は必ず ClemotiusSignature を dwExtraInfo に載せているため、これで識別する。
+        if (data.dwExtraInfo == InputNative.ClemotiusSignature)
             return false;
         NoteRealEvent();
         return Handler?.Invoke((int)wParam, data) ?? false;

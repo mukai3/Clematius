@@ -22,40 +22,57 @@ internal static class RightDragItemDetector
     private const int ROLE_SYSTEM_OUTLINEITEM = 35; // ツリー項目（フォルダツリー等）
 
     private const int NearPx = 8;
-    // 右DOWN読み出しの有効期間。静止カーソル下の項目/背景はしばらく変わらないため長め。
-    private const uint ReadFreshMs = 2000;
+    // 右DOWN読み出しの有効期間。静止カーソル下の項目/背景はしばらく変わらないが、
+    // ウィンドウ内容の変化に古い判定を使い続けないよう短めにする（hwnd 一致も必須にしている）。
+    private const uint ReadFreshMs = 500;
     // 移動中の再判定しきい。これより古ければホバー先読みで温め直す。
     private const uint PrimeFreshMs = 400;
     // バックグラウンド判定の最小起動間隔（先読みの多重・過剰起動を抑える）。
     private const uint MinProbeIntervalMs = 60;
+    // バックグラウンド判定の最大実行時間。MSAA が相手プロセス都合で長時間戻らないと、
+    // 単純な 0/1 ガードでは解放されず以後の判定が永久に起動しなくなる。これを超えたリースは
+    // 「詰まった」とみなして新しい判定が奪えるようにし、検出がグローバルに固まるのを防ぐ。
+    private const uint ProbeMaxMs = 1000;
 
-    private sealed record CacheEntry(int X, int Y, bool IsItem, uint Tick);
+    // キャッシュは座標近傍だけでなく対象ウィンドウ(hwnd)一致も条件にする。同じ座標でも
+    // 前面ウィンドウや内容が変われば古い項目判定を使わない（誤透過/誤開始を防ぐ）。
+    private sealed record CacheEntry(int X, int Y, nint Hwnd, bool IsItem, uint Tick);
     private static volatile CacheEntry? _cache;
-    private static int _probing;            // 単発起動ガード (0/1)
+    private static uint _probeLease;         // バックグラウンド判定のリース (0=空き、それ以外=開始tick)
     private static uint _lastProbeStartTick; // 直近のバックグラウンド判定起動時刻
 
     /// <returns>項目（ファイル/フォルダ等）の上なら true。背景上・不明なら false（ジェスチャー優先）。</returns>
     public static bool IsOverDraggableItem(int x, int y)
     {
-        if (Lookup(x, y, ReadFreshMs) is bool cached)
+        nint hwnd = WindowAt(x, y);
+        if (hwnd == 0)
+            return false; // 対象ウィンドウ無し＝項目でない（ジェスチャー優先）
+        if (Lookup(x, y, hwnd, ReadFreshMs) is bool cached)
             return cached;
         // 温まっていなければフックスレッドは待たず、次回以降のため起動だけして今回はジェスチャー優先。
-        KickProbe(x, y, force: true);
+        KickProbe(x, y, hwnd, force: true);
         return false;
     }
 
     /// <summary>マウス移動中の事前判定。右DOWN前にキャッシュを温める。</summary>
     public static void Prime(int x, int y)
     {
-        if (Lookup(x, y, PrimeFreshMs) is not null)
-            return; // 近傍に十分新しい結果あり
-        KickProbe(x, y, force: false);
+        nint hwnd = WindowAt(x, y);
+        if (hwnd == 0)
+            return;
+        if (Lookup(x, y, hwnd, PrimeFreshMs) is not null)
+            return; // 近傍・同一ウィンドウに十分新しい結果あり
+        KickProbe(x, y, hwnd, force: false);
     }
 
-    private static bool? Lookup(int x, int y, uint freshMs)
+    private static nint WindowAt(int x, int y)
+        => InputNative.WindowFromPoint(new NativeMethods.POINT { X = x, Y = y });
+
+    private static bool? Lookup(int x, int y, nint hwnd, uint freshMs)
     {
         var c = _cache;
-        if (c is not null && (uint)Environment.TickCount - c.Tick < freshMs
+        if (c is not null && c.Hwnd == hwnd
+            && (uint)Environment.TickCount - c.Tick < freshMs
             && Math.Abs(x - c.X) < NearPx && Math.Abs(y - c.Y) < NearPx)
         {
             return c.IsItem;
@@ -63,32 +80,51 @@ internal static class RightDragItemDetector
         return null;
     }
 
-    private static void KickProbe(int x, int y, bool force)
+    private static void KickProbe(int x, int y, nint hwnd, bool force)
     {
         uint now = (uint)Environment.TickCount;
         if (!force && now - _lastProbeStartTick < MinProbeIntervalMs)
             return;
-        if (Interlocked.CompareExchange(ref _probing, 1, 0) != 0)
+        uint lease = TryAcquireProbe();
+        if (lease == 0)
             return;
         _lastProbeStartTick = now;
         Task.Run(() =>
         {
             try
             {
-                bool isItem = Probe(x, y);
-                _cache = new CacheEntry(x, y, isItem, (uint)Environment.TickCount);
+                bool isItem = Probe(x, y, hwnd);
+                _cache = new CacheEntry(x, y, hwnd, isItem, (uint)Environment.TickCount);
             }
             finally
             {
-                Volatile.Write(ref _probing, 0);
+                ReleaseProbe(lease);
             }
         });
     }
 
-    private static bool Probe(int x, int y)
+    // バックグラウンド判定のリースを取得する。空き、または期限超過で詰まったリースを奪えたら
+    // その開始 tick（解放用トークン、0 は使わない）を返す。取れなければ 0。
+    private static uint TryAcquireProbe()
     {
-        var pt = new NativeMethods.POINT { X = x, Y = y };
-        nint hwnd = InputNative.WindowFromPoint(pt);
+        uint now = (uint)Environment.TickCount;
+        if (now == 0) now = 1; // 0 は「空き」を表すので避ける
+        while (true)
+        {
+            uint cur = Volatile.Read(ref _probeLease);
+            if (cur != 0 && now - cur < ProbeMaxMs)
+                return 0; // 実行中かつ期限内
+            if (Interlocked.CompareExchange(ref _probeLease, now, cur) == cur)
+                return now; // 空き、または期限超過のリースを奪った
+        }
+    }
+
+    // 自分のリースのままなら解放する。期限超過で横取りされていたら触らない。
+    private static void ReleaseProbe(uint myToken)
+        => Interlocked.CompareExchange(ref _probeLease, 0, myToken);
+
+    private static bool Probe(int x, int y, nint hwnd)
+    {
         if (hwnd == 0)
             return false;
 

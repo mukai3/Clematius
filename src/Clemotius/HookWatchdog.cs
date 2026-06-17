@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using Clemotius.Core.Diagnostics;
 using Clemotius.Hooks;
 using Clemotius.Interop;
@@ -42,6 +44,7 @@ internal sealed class HookWatchdog : IDisposable
     private bool _probeInFlight;   // マウスプローブ送出済み・確認待ち
     private bool _mouseAliveThisCycle; // 直近の確認でマウス生存が取れたか
     private int _mouseMissStreak;  // 連続でプローブが不達だった回数
+    private int _reinstalling;     // 再設置タスク実行中ガード (0/1)
 
     public HookWatchdog(MouseHook mouse, KeyboardHook keyboard, Action onReinstalled)
     {
@@ -116,7 +119,7 @@ internal sealed class HookWatchdog : IDisposable
             (uint)Environment.TickCount, _mouse.LastRealEventTick) < StaleThresholdMs;
         bool alive = advanced || realRecent;
 
-        bool reinstalled = false;
+        bool reinstallMouse = false;
         if (alive)
         {
             _mouseMissStreak = 0;
@@ -124,11 +127,10 @@ internal sealed class HookWatchdog : IDisposable
         }
         else if (++_mouseMissStreak >= RequiredMissStreak)
         {
-            // 連続で注入が届かない＝フックが外れたと判断して再設置
-            _mouse.Reinstall();
+            // 連続で注入が届かない＝フックが外れたと判断して再設置（実行は背後で）
             _mouseMissStreak = 0;
-            _mouseAliveThisCycle = true; // 再設置したので以降は生存扱い
-            reinstalled = true;
+            _mouseAliveThisCycle = true; // 再設置を要求したので以降は生存扱い
+            reinstallMouse = true;
         }
         else
         {
@@ -137,16 +139,15 @@ internal sealed class HookWatchdog : IDisposable
         }
 
         // マウス生存が確定した上でキーボードの生死を推論する
-        if (CheckKeyboard())
-            reinstalled = true;
+        bool reinstallKeyboard = KeyboardLikelyDead();
 
-        if (reinstalled)
-            _onReinstalled();
+        if (reinstallMouse || reinstallKeyboard)
+            RequestReinstall(reinstallMouse, reinstallKeyboard);
     }
 
-    // ── キーボード: 演繹による推論（注入なし） ──
+    // ── キーボード: 演繹による推論（注入なし。判定のみで副作用は持たない） ──
 
-    private bool CheckKeyboard()
+    private bool KeyboardLikelyDead()
     {
         if (!_keyboard.IsInstalled)
             return false;
@@ -158,19 +159,42 @@ internal sealed class HookWatchdog : IDisposable
         if (!NativeMethods.GetLastInputInfo(ref info))
             return false;
 
-        bool dead = HookLiveness.KeyboardLikelyDead(
+        return HookLiveness.KeyboardLikelyDead(
             nowTick: (uint)Environment.TickCount,
             systemInputTick: info.dwTime,
             keyboardEventTick: _keyboard.LastEventTick,
             mouseRealEventTick: _mouse.LastRealEventTick,
             staleThresholdMs: StaleThresholdMs,
             mouseConfirmedAlive: _mouseAliveThisCycle);
+    }
 
-        if (!dead)
-            return false;
-
-        _keyboard.Reinstall();
-        return true;
+    /// <summary>
+    /// フック再設置を専用バックグラウンドで実行する。再設置は内部でフックスレッドの終了待ち
+    /// （<see cref="LowLevelHook.Uninstall"/> の Join）を伴うため、UI スレッド（WinForms Timer）
+    /// 上で直接行うと一時停止しうる。多重起動を防ぎ、前回が完了するまで次は起動しない。
+    /// 実際に再設置できたフックがあったときだけ修飾キー状態をリセットする。
+    /// </summary>
+    private void RequestReinstall(bool mouse, bool keyboard)
+    {
+        if (Interlocked.CompareExchange(ref _reinstalling, 1, 0) != 0)
+            return;
+        Task.Run(() =>
+        {
+            try
+            {
+                bool reinstalled = false;
+                if (mouse)
+                    reinstalled |= _mouse.Reinstall();
+                if (keyboard)
+                    reinstalled |= _keyboard.Reinstall();
+                if (reinstalled)
+                    _onReinstalled();
+            }
+            finally
+            {
+                Volatile.Write(ref _reinstalling, 0);
+            }
+        });
     }
 
     /// <summary>カーソルを動かさない 0 移動イベントを自前署名つきで注入する。</summary>

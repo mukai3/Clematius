@@ -29,11 +29,11 @@ internal sealed class ActionExecutor
         }
     }
 
-    // ハングした対象アプリを待ち続けないための上限（ms）。Execute は Task.Run 経由で
-    // 呼ばれるためフックスレッドは止まらないが、応答なしアプリへの同期送信が溜まると
-    // ThreadPool を圧迫し、戻る/進む等のアクション処理全体が遅延し得る。SMTO_ABORTIFHUNG
-    // でハング時は即座に打ち切る（戻る/進むは失敗しても無視でよい）。
-    private const uint AppCommandTimeoutMs = 1000;
+    // ハングした対象アプリを待ち続けないための上限（ms）。Execute は専用ワーカー（ActionDispatcher）
+    // 経由で直列に呼ばれるためフックスレッドは止まらないが、応答なしアプリへの同期送信が長いと
+    // 後続アクション（戻る/進む等）の処理が遅延する。入力補助としては待ち続けるより捨てる方が安全な
+    // ため、上限は短く取る。SMTO_ABORTIFHUNG でハング時は即座に打ち切る（戻る/進むは失敗しても無視でよい）。
+    private const uint AppCommandTimeoutMs = 200;
 
     private static void SendAppCommand(AppCommand command, nint targetWindow)
     {

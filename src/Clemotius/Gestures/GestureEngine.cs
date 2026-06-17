@@ -20,7 +20,7 @@ namespace Clemotius.Gestures;
 internal sealed class GestureEngine
 {
     private readonly IGestureContextProvider _provider;
-    private readonly ActionExecutor _executor;
+    private readonly ActionDispatcher _dispatcher;
 
     // フックコールバック（フックスレッド）とタイムアウトタイマー（別スレッド）から
     // 共有状態を触るためロックで保護する。
@@ -48,13 +48,15 @@ internal sealed class GestureEngine
     public GestureEngine(IGestureContextProvider provider, ActionExecutor executor)
     {
         _provider = provider;
-        _executor = executor;
+        _dispatcher = new ActionDispatcher(executor);
     }
 
-    // アクション実行はフックコールバックを軽く保つため別タスクへ逃がす
-    // （SendMessage 等がブロックしてもフックが OS に外されないようにする）
+    // アクション実行はフックコールバックを軽く保つため専用ワーカーへ逃がす
+    // （SendMessage 等がブロックしてもフックが OS に外されないようにする）。
+    // 高速な右+ホイール連打でも ThreadPool を膨らませず、上限超過分は捨てて
+    // 後追い実行を溜めない（ActionDispatcher）。
     private void ExecuteAsync(GestureAction action, nint target)
-        => Task.Run(() => _executor.Execute(action, target));
+        => _dispatcher.Enqueue(action, target);
 
     /// <returns>true ならイベントを飲み込む</returns>
     public bool OnMouse(int message, NativeMethods.MSLLHOOKSTRUCT data)

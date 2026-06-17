@@ -68,20 +68,35 @@ internal abstract class LowLevelHook : IDisposable
             throw new Win32Exception(Marshal.GetLastWin32Error());
     }
 
-    public void Uninstall()
+    // フックスレッド終了待ちの上限。フックコールバックが何らかの理由で詰まっていると
+    // メッセージループが戻らないことがあるため、無期限 Join を避けて呼び出し元（監視）を
+    // 止めない。期限切れ時は旧スレッドを放棄する。
+    private const int JoinTimeoutMs = 2000;
+
+    /// <returns>スレッドが確実に終了し再設置可能なら true。終了確認できなければ false。</returns>
+    public bool Uninstall()
     {
-        if (_thread is not { IsAlive: true })
-            return;
+        var thread = _thread;
+        if (thread is not { IsAlive: true })
+            return true;
         // 専用スレッドのメッセージループを終了させる → ループ末尾で UnhookWindowsHookEx
-        NativeMethods.PostThreadMessageW(_threadId, NativeMethods.WM_QUIT, 0, 0);
-        _thread.Join();
+        if (!NativeMethods.PostThreadMessageW(_threadId, NativeMethods.WM_QUIT, 0, 0))
+            return false; // ポスト失敗（スレッドが受け取れない状態）。Join もしない。
+        if (!thread.Join(JoinTimeoutMs))
+            return false; // 期限内に終了せず＝フックスレッドが詰まっている。放棄して呼び出し元を止めない。
         _thread = null;
+        return true;
     }
 
-    public void Reinstall()
+    /// <returns>再設置できたら true。旧スレッドを終了できず二重設置を避けてスキップしたら false。</returns>
+    public bool Reinstall()
     {
-        Uninstall();
+        // 旧スレッドを終了できないまま Install すると、外れていない古いフックが残ったまま
+        // 二重設置になる。確実に終了できたときだけ設置し直す（できなければ degraded のまま）。
+        if (!Uninstall())
+            return false;
         Install();
+        return true;
     }
 
     private void ThreadProc()
