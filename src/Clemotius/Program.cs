@@ -169,6 +169,11 @@ internal sealed class AppContext : ApplicationContext
             return;
         }
         _wpfSettings = new SettingsUi.SettingsWindow(_configStore.Current);
+        // 本アプリは WinForms 主体（Application.Run）で、設定ウィンドウは WPF をモードレス Show する。
+        // この構成では WPF の入力系へキーメッセージが橋渡しされず、WM_CHAR を要する直接タイプ
+        // （IME-OFF）だけ文字にならない（IME/Ctrl+V/クリックは別経路で成立）。これを有効化して
+        // モードレス WPF ウィンドウでも通常のキー入力が効くようにする。
+        System.Windows.Forms.Integration.ElementHost.EnableModelessKeyboardInterop(_wpfSettings);
         _wpfSettings.ViewModel.Applied += cfg => _configStore.Save(cfg);
         _wpfSettings.Closed += (_, _) =>
         {

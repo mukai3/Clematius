@@ -83,14 +83,15 @@
             </ListView.View>
         </ListView>
 
-        <!--  一覧が空のときの案内（リストには重ねず最前面・ヒットテスト無効）  -->
+        <!--  一覧が空のときの案内（リスト本体の中央。列ヘッダーに重ならないよう Center 配置）  -->
         <TextBlock
             Grid.Row="1"
-            Margin="12,16,12,0"
+            Margin="24,28,24,12"
             HorizontalAlignment="Center"
-            VerticalAlignment="Top"
+            VerticalAlignment="Center"
             Foreground="{DynamicResource TextFillColorSecondaryBrush}"
             IsHitTestVisible="False"
+            TextAlignment="Center"
             Text="ジェスチャーはまだ登録されていません。下の「追加」から登録できます。"
             TextWrapping="Wrap"
             Visibility="{Binding Gesture.Gestures.Count, Converter={StaticResource EmptyToVisible}}" />
