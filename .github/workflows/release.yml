@@ -14,6 +14,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # MinVer がタグ履歴からバージョンを採番するため全履歴を取得
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -21,11 +23,11 @@ jobs:
 
       - name: Publish (framework-dependent, win-x64)
         shell: pwsh
+        # バージョンは MinVer が push されたタグ(例 v0.4 → 0.4.0)から自動採番する。
         run: |
-          $version = "${{ github.ref_name }}".TrimStart('v')
           dotnet publish src/Clemotius/Clemotius.csproj `
             -c Release -r win-x64 --self-contained false `
-            -p:DebugType=none -p:Version=$version `
+            -p:DebugType=none `
             -o publish
 
       - name: Package
