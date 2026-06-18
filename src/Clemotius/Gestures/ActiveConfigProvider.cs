@@ -80,7 +80,6 @@ internal sealed class ActiveConfigProvider : IGestureContextProvider
         bool? known = RightDragItemDetector.TryKnownItem(startX, startY);
         if (known == true)
             return null;
-        bool confirmDrag = known is null;
 
         lock (_gate)
         {
@@ -89,9 +88,10 @@ internal sealed class ActiveConfigProvider : IGestureContextProvider
                 matcher = new GestureMatcher(profile.Gestures);
                 _matcherCache[profile.Name] = matcher;
             }
+            // known is null（未確定＝コールド）のときだけ、後で項目判定→ドラッグ転換する
             return new GestureContext(
                 matcher, Enabled: true, profile.WheelUp, profile.WheelDown,
-                ConfirmDragOnItem: confirmDrag);
+                ConfirmDragOnItem: known is null);
         }
     }
 

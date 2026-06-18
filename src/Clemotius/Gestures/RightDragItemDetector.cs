@@ -72,19 +72,12 @@ internal static class RightDragItemDetector
     /// </summary>
     public static void ConfirmItemAsync(int x, int y, Action<bool> onResult)
     {
+        // フックスレッドを止めないため確定は常にバックグラウンドで行う（結果を受けた呼び出し側が
+        // SendInput 等をしてもフックを塞がない）。キャッシュに確定があればプローブは省く。
         Task.Run(() =>
         {
             nint hwnd = WindowAt(x, y);
-            bool isItem;
-            if (hwnd == 0)
-                isItem = false;
-            else if (Lookup(x, y, hwnd, ReadFreshMs) is bool cached)
-                isItem = cached;
-            else
-            {
-                isItem = Probe(x, y, hwnd);
-                _cache = new CacheEntry(x, y, hwnd, isItem, (uint)Environment.TickCount);
-            }
+            bool isItem = hwnd != 0 && (Lookup(x, y, hwnd, ReadFreshMs) ?? ProbeAndCache(x, y, hwnd));
             onResult(isItem);
         });
     }
@@ -117,14 +110,21 @@ internal static class RightDragItemDetector
         {
             try
             {
-                bool isItem = Probe(x, y, hwnd);
-                _cache = new CacheEntry(x, y, hwnd, isItem, (uint)Environment.TickCount);
+                ProbeAndCache(x, y, hwnd);
             }
             finally
             {
                 ReleaseProbe(lease);
             }
         });
+    }
+
+    // Probe して結果をキャッシュへ書き、判定を返す（プローブ実行とキャッシュ書き込みの単一経路）。
+    private static bool ProbeAndCache(int x, int y, nint hwnd)
+    {
+        bool isItem = Probe(x, y, hwnd);
+        _cache = new CacheEntry(x, y, hwnd, isItem, (uint)Environment.TickCount);
+        return isItem;
     }
 
     // バックグラウンド判定のリースを取得する。空き、または期限超過で詰まったリースを奪えたら

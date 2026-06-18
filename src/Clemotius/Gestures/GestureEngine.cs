@@ -143,22 +143,16 @@ internal sealed class GestureEngine
         {
             // 同じジェスチャーが保留中で、まだ入力が始まっていないときだけ転換する
             // （ユーザーがすでにストローク/ホイールを始めていたら触らない）。
-            if (gen != _gestureGen || !_pending || _strokeWindowClosed || _wheelUsed
-                || (_encoder?.HasStrokes ?? false))
+            if (gen != _gestureGen || !IsUntouchedLocked())
                 return;
             _pending = false;
             CancelTimeoutLocked();
-            _encoder?.Reset();
+            _encoder!.Reset();
         }
-        // 注入はフックスレッド外（このコールバックは ThreadPool 上）で行う。
-        InjectRightDown();
+        // 注入はフックスレッド外（このコールバックは ThreadPool 上）で行う。物理ボタンは押下継続中なので、
+        // 署名付き右DOWNを注入すれば続く物理移動・物理UPでアプリ側の右ドラッグが成立する。
+        Send(RightButton(InputNative.MOUSEEVENTF_RIGHTDOWN));
         GestureEnded?.Invoke(); // 軌跡/コマンド表示を片付ける
-    }
-
-    private static void InjectRightDown()
-    {
-        var inputs = new[] { RightButton(InputNative.MOUSEEVENTF_RIGHTDOWN) };
-        InputNative.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<InputNative.INPUT>());
     }
 
     private void OnMove(int x, int y)
@@ -273,14 +267,17 @@ internal sealed class GestureEngine
         _timeoutTimer = null;
     }
 
+    // 保留中で、まだストローク/ホイール/タイムアウトのいずれも始まっていない「手付かず」状態か。
+    // _pending が偽のときは _encoder が未確定なので、短絡評価で _encoder! には触れない。
+    private bool IsUntouchedLocked()
+        => _pending && !_strokeWindowClosed && !_wheelUsed && !_encoder!.HasStrokes;
+
     private void OnTimeout()
     {
         lock (_gate)
         {
-            if (!_pending)
-                return; // 既に確定/解放済み
-            if (_strokeWindowClosed || _encoder!.HasStrokes || _wheelUsed)
-                return; // 既に打ち切り済み、または入力が始まっている→タイムアウト無効
+            if (!IsUntouchedLocked())
+                return; // 既に確定/解放済み、または入力が始まっている→タイムアウト無効
             // ストローク開始の猶予切れ。右クリックはここでは再生せず（メニューを出さず）、
             // 保留を維持したまま判定だけ打ち切る。右ボタンを離した時点で OnRightUp が
             // ストローク無しとして通常の右クリックを再生する。
@@ -296,14 +293,11 @@ internal sealed class GestureEngine
         or NativeMethods.WM_XBUTTONDOWN or NativeMethods.WM_XBUTTONUP;
 
     private static void ReplayRightClick()
-    {
-        var inputs = new[]
-        {
-            RightButton(InputNative.MOUSEEVENTF_RIGHTDOWN),
-            RightButton(InputNative.MOUSEEVENTF_RIGHTUP),
-        };
-        InputNative.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<InputNative.INPUT>());
-    }
+        => Send(RightButton(InputNative.MOUSEEVENTF_RIGHTDOWN), RightButton(InputNative.MOUSEEVENTF_RIGHTUP));
+
+    // 署名付き入力を1回の SendInput でまとめて送る共通ヘルパ。
+    private static void Send(params InputNative.INPUT[] inputs)
+        => InputNative.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<InputNative.INPUT>());
 
     private static InputNative.INPUT RightButton(uint flag) => new()
     {
