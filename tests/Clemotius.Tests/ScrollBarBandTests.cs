@@ -58,4 +58,50 @@ public class ScrollBarBandTests
     {
         Assert.Equal(BandHit.None, ScrollBarBand.Hit(0, 0, 0, 0, 0, 0, true, true, 17, 17));
     }
+
+    // EdgeCandidate: 窓 (100,100) 500x400、バー17 → 帯幅 17+4=21（スクロール可否は見ない）
+    private static BandHit Edge(int x, int y)
+        => ScrollBarBand.EdgeCandidate(x, y, 100, 100, 500, 400, 17, 17);
+
+    [Fact]
+    public void EdgeCandidate_RightEdge_IsVertical()
+    {
+        Assert.Equal(BandHit.Vertical, Edge(599, 300));  // 右端ぎりぎり
+        Assert.Equal(BandHit.Vertical, Edge(579, 300));  // 帯の内側境界 (600-21=579)
+    }
+
+    [Fact]
+    public void EdgeCandidate_BottomEdge_IsHorizontal()
+    {
+        Assert.Equal(BandHit.Horizontal, Edge(300, 499));
+        Assert.Equal(BandHit.Horizontal, Edge(300, 479)); // 500-21=479
+    }
+
+    [Fact]
+    public void EdgeCandidate_Center_IsNone()
+    {
+        Assert.Equal(BandHit.None, Edge(300, 300));
+        Assert.Equal(BandHit.None, Edge(578, 300)); // 右帯の1px外
+        Assert.Equal(BandHit.None, Edge(300, 478)); // 下帯の1px外
+    }
+
+    [Fact]
+    public void EdgeCandidate_BottomRightCorner_PrefersVertical()
+    {
+        Assert.Equal(BandHit.Vertical, Edge(599, 499));
+    }
+
+    [Fact]
+    public void EdgeCandidate_OutsideWindow_IsNone()
+    {
+        Assert.Equal(BandHit.None, Edge(601, 300)); // 右外
+        Assert.Equal(BandHit.None, Edge(99, 300));  // 左外
+        Assert.Equal(BandHit.None, Edge(300, 501)); // 下外
+    }
+
+    [Fact]
+    public void EdgeCandidate_EmptyRect_IsNone()
+    {
+        Assert.Equal(BandHit.None, ScrollBarBand.EdgeCandidate(0, 0, 0, 0, 0, 0, 17, 17));
+    }
 }
