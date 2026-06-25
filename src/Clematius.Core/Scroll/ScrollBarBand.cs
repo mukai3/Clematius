@@ -82,4 +82,25 @@ public static class ScrollBarBand
             return BandHit.Horizontal;
         return BandHit.None;
     }
+
+    /// <summary>
+    /// スクロールバーがありそうな「下側/右側ゾーン」にカーソルがあるかの粗いゲート。ブラウザ描画窓の
+    /// 先読みを中央コンテンツでは起動せず、横バーのある下端側・縦バーのある右端側に絞るのに使う。
+    /// Chromium の横バーは窓端の数 px ではなくビューポート下部にあるため、端帯（数 px）ではなく
+    /// 下側 <paramref name="lowerFraction"/>・右側 <paramref name="rightFraction"/> の広めの帯で見る。
+    /// 実際にスクロールバーかの確定は UIA 検出（<see cref="Hit"/>）で行う。
+    /// </summary>
+    public static bool InEdgeZone(
+        int x, int y, int left, int top, int width, int height,
+        double lowerFraction, double rightFraction)
+    {
+        if (width <= 0 || height <= 0)
+            return false;
+        if (x < left || x >= left + width || y < top || y >= top + height)
+            return false;
+
+        bool lower = y >= top + height - (int)(height * lowerFraction);
+        bool right = x >= left + width - (int)(width * rightFraction);
+        return lower || right;
+    }
 }

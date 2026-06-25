@@ -114,4 +114,39 @@ public class ScrollBarBandTests
     {
         Assert.Equal(BandHit.None, ScrollBarBand.EdgeCandidate(0, 0, 0, 0, 0, 0, 17, 17));
     }
+
+    // InEdgeZone: 窓 (100,100) 500x400、下側30%(高さ400→120px, 境界 500-120=380)・右側22%(幅500→110px, 境界 600-110=490)
+    private static bool Zone(int x, int y)
+        => ScrollBarBand.InEdgeZone(x, y, 100, 100, 500, 400, 0.30, 0.22);
+
+    [Fact]
+    public void InEdgeZone_LowerBand_IsTrue()
+    {
+        Assert.True(Zone(300, 499)); // 下端
+        Assert.True(Zone(300, 380)); // 下側30%の内側境界 (500-120=380)
+    }
+
+    [Fact]
+    public void InEdgeZone_RightBand_IsTrue()
+    {
+        Assert.True(Zone(599, 300)); // 右端
+        Assert.True(Zone(490, 300)); // 右側22%の内側境界 (600-110=490)
+    }
+
+    [Fact]
+    public void InEdgeZone_CenterAndUpper_IsFalse()
+    {
+        Assert.False(Zone(300, 300)); // 中央
+        Assert.False(Zone(300, 379)); // 下側ゾーンの1px外
+        Assert.False(Zone(489, 300)); // 右側ゾーンの1px外
+        Assert.False(Zone(200, 200)); // 左上
+    }
+
+    [Fact]
+    public void InEdgeZone_OutsideWindow_IsFalse()
+    {
+        Assert.False(Zone(601, 499)); // 右外
+        Assert.False(Zone(300, 501)); // 下外
+        Assert.False(ScrollBarBand.InEdgeZone(0, 0, 0, 0, 0, 0, 0.30, 0.22)); // 空矩形
+    }
 }

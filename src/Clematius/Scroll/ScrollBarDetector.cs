@@ -36,6 +36,11 @@ internal static class ScrollBarDetector
 
     private static volatile CacheEntry? _cache;
 
+    // キャッシュ再利用の有効期間（いずれも 8px 両軸一致が前提）。None は通常スクロール中に素早く
+    // 再評価できるよう短く、ヒット(バー)はホバー先読みが寿命切れせずホイールまで残るよう長くする。
+    private const uint CacheNoneMs = 250;
+    private const uint CacheHitMs = 1200;
+
     // MSAA/UIA バックグラウンド検出のリース (0=空き、それ以外=開始tick)。MSAA/UIA が相手プロセス
     // 都合で長時間戻らないと、単純な 0/1 ガードでは解放されず以後の検出が永久に起動しなくなる。
     // ProbeMaxMs を超えたリースは「詰まった」とみなして新しい検出が奪えるようにし、検出が
@@ -85,8 +90,14 @@ internal static class ScrollBarDetector
     {
         var c = _cache;
         uint now = (uint)Environment.TickCount;
-        if (c is not null && now - c.Tick < 250 && Math.Abs(x - c.X) < 8 && Math.Abs(y - c.Y) < 8)
-            return (c.Hit, c.Target, c.Wheel);
+        // ヒット(バー)はホバー先読みが消えないよう長め、None はコンテンツ上で素早く再評価できるよう短め。
+        // どちらも 8px 両軸一致が条件なので、長寿命でも別位置（通常スクロール中）には波及しない。
+        if (c is not null)
+        {
+            uint maxAge = c.Hit == ScrollBarHit.None ? CacheNoneMs : CacheHitMs;
+            if (now - c.Tick < maxAge && Math.Abs(x - c.X) < 8 && Math.Abs(y - c.Y) < 8)
+                return (c.Hit, c.Target, c.Wheel);
+        }
 
         var pt = new NativeMethods.POINT { X = x, Y = y };
         nint hwnd = InputNative.WindowFromPoint(pt);
@@ -143,17 +154,86 @@ internal static class ScrollBarDetector
     private static volatile EdgePrime? _lastEdgePrime;
     private const uint EdgePrimeThrottleMs = 150;
 
+    // ブラウザのコンテンツ描画窓クラス（Chromium 系: Chrome/Edge/WebView2/Electron、Firefox）。
+    private static bool IsBrowserContentClass(string cls)
+        => cls == "Chrome_RenderWidgetHostHWND" || cls == "MozillaWindowClass";
+
+    // ── ブラウザ描画窓の settle-debounce 先読み ──
+    // Chromium の横バーは窓端に無く端帯では拾えないため UIA 検出が要るが、マウス移動毎に UIA を当て
+    // 続けると相手のアクセシビリティが持続的に熱くなり重いサイト（YouTube 等）で stutter になる。
+    // そこで「カーソルが約100ms静止したら最終位置で1回だけ UIA 先読み」する。高速移動中は probe 0回、
+    // バー上で止めてホイールする自然な操作では静止1回で温まり横バー初回ノッチが正しくなる。純縦
+    // スクロール（マウス静止）中は WM_MOUSEMOVE 自体来ないので追加 probe は走らない。
+    private const int BrowserSettlePrimeDelayMs = 100;
+    // バー上に留まる間はキャッシュ寿命(CacheHitMs)を超えないよう定期的に温め直す。静止中は
+    // WM_MOUSEMOVE が来ず Prime で再温めできないため、タイマーで補う。コンテンツ(None)では
+    // 再アームしないので、コンテンツ上での定期 UIA は走らず stutter を招かない。
+    private const int BrowserSettleRefreshMs = 800;
+    // 直近のマウス移動からこの時間で定期リフレッシュを打ち切る（バー上に放置された時の無駄を防ぐ）。
+    private const uint BrowserSettleMaxIdleMs = 12000;
+    // 中央コンテンツ（横カルーセル等）での無駄 probe・誤横判定を避け、バーのある下側/右側に絞る。
+    private const double BrowserZoneLowerFraction = 0.30; // 下側30%（横バー狙い）
+    private const double BrowserZoneRightFraction = 0.22; // 右側22%（縦バー補助）
+    private sealed record SettlePoint(nint Hwnd, int X, int Y);
+    private static volatile SettlePoint? _settlePoint;
+    private static uint _lastSettleMoveTick;
+    private static readonly System.Threading.Timer _settleTimer =
+        new(OnSettleTimer, null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+
+    // フックスレッドから呼ぶ。最終静止位置と移動時刻を記録してタイマーを再セットするだけ（probe はしない）。
+    private static void ArmBrowserSettlePrime(nint hwnd, int x, int y)
+    {
+        Volatile.Write(ref _lastSettleMoveTick, (uint)Environment.TickCount);
+        _settlePoint = new SettlePoint(hwnd, x, y);
+        _settleTimer.Change(BrowserSettlePrimeDelayMs, System.Threading.Timeout.Infinite);
+    }
+
+    // タイマー（スレッドプール）から発火。静止した最終位置で UIA 検出してキャッシュを温める。
+    // バー(hit≠None)なら定期的に温め直して寿命切れを防ぐ。コンテンツ(None)では再アームしない。
+    private static void OnSettleTimer(object? _)
+    {
+        var sp = _settlePoint;
+        if (sp is null)
+            return;
+
+        uint lease = TryAcquireProbe();
+        if (lease == 0)
+        {
+            // 他の検出中。少し後に再試行する。
+            _settleTimer.Change(BrowserSettlePrimeDelayMs, System.Threading.Timeout.Infinite);
+            return;
+        }
+        var hit = ScrollBarHit.None;
+        try
+        {
+            // ブラウザ描画窓なので UIA のみ（MSAA は Chromium で無効＝無駄＋lease 占有）。
+            var u = DetectByUia(sp.X, sp.Y, sp.Hwnd);
+            hit = u.hit;
+            uint t = (uint)Environment.TickCount;
+            if (LeaseStillMine(lease))
+            {
+                _cache = new CacheEntry(sp.X, sp.Y, u.hit, u.target, false, t);
+                if (u.hit != ScrollBarHit.None)
+                    _lastCustom = new CustomHit(sp.Hwnd, sp.X, sp.Y, u.hit, false, t);
+            }
+        }
+        finally
+        {
+            ReleaseProbe(lease);
+        }
+
+        // バー上で、かつ直近の移動から一定時間内なら、静止中もキャッシュを温め直す。
+        if (hit != ScrollBarHit.None &&
+            (uint)Environment.TickCount - Volatile.Read(ref _lastSettleMoveTick) < BrowserSettleMaxIdleMs)
+            _settleTimer.Change(BrowserSettleRefreshMs, System.Threading.Timeout.Infinite);
+    }
+
     /// <summary>
     /// マウス移動中の事前検出（ホバー先読み）。直後のホイールが最初の1ノッチから正しい軸で動くよう
     /// バックグラウンドで検出してキャッシュを温める（プロセス外フックでは同期 MSAA が使えないための代替）。
-    /// 対象は (1) カスタムスクロールバーらしい「細い窓」、または (2) 大窓でも右端/下端のスクロールバー帯。
-    /// フックスレッドでは WindowFromPoint/GetWindowRect（ローカルで安全）しか行わない。
-    ///
-    /// 注意: ブラウザのコンテンツ描画窓（Chromium 等）でマウス移動毎に UIA を当て続けると、相手の
-    /// アクセシビリティが持続的に有効化され、重いサイト（YouTube 等）でスクロールが引っかかる原因に
-    /// なる。そのため大窓の先読みは「右端/下端の端帯」に限定し、コンテンツ全面での常時先読みはしない。
-    /// （Chromium の縦バーは描画窓の右端にあり端帯で温まる。横バーは窓端に無いため初回1ノッチのみ
-    ///   素通しになりうるが、これは許容して常時先読みによる実害を避ける。）
+    /// 対象は (1) 細い窓＝独立カスタムバー窓、(2) ブラウザ描画窓の下側/右側ゾーン（settle-debounce で
+    /// 静止時のみ）、(3) その他大窓の右端/下端の端帯。フックスレッドでは WindowFromPoint/GetWindowRect
+    /// （ローカルで安全）しか行わない。
     /// </summary>
     public static void Prime(int x, int y)
     {
@@ -161,23 +241,34 @@ internal static class ScrollBarDetector
         uint now = (uint)Environment.TickCount;
         if (c is not null && now - c.Tick < 250 && Math.Abs(x - c.X) < 8 && Math.Abs(y - c.Y) < 8)
             return; // 近傍に新しい結果あり
-        if (ProbeBusy())
-            return; // 既に検出中（期限内）
 
         nint hwnd = InputNative.WindowFromPoint(new NativeMethods.POINT { X = x, Y = y });
         if (hwnd == 0 || !InputNative.GetWindowRect(hwnd, out var r))
             return;
 
-        // (1) 細い窓＝独立カスタムバー窓: 従来どおり MSAA→UIA で常に温める
+        // (1) 細い窓＝独立カスタムバー窓: 従来どおり MSAA→UIA で即温める
         if (Math.Min(r.Right - r.Left, r.Bottom - r.Top) <= ScrollbarWindowThickness)
         {
-            KickProbe(x, y, hwnd);
+            if (!ProbeBusy())
+                KickProbe(x, y, hwnd);
             return;
         }
 
-        // (2) 大窓: 右端/下端のスクロールバー帯ならホバー先読みする（窓端にバーがあるアプリ向け。
-        // Chromium の縦バーもここで温まる）。端帯でないコンテンツ全面では先読みしない（常時 UIA で
-        // 相手のアクセシビリティを熱くし続けないため）。
+        // (2) ブラウザの描画窓: 下側/右側ゾーンなら settle-debounce 先読みを予約する（静止時のみ1回
+        // UIA。常時 UIA で相手のアクセシビリティを熱くし続けないため）。ProbeBusy では弾かない
+        // （予約だけ。実 probe は静止後にタイマー→lease で起動）。
+        if (IsBrowserContentClass(GetClassName(hwnd)))
+        {
+            if (Clematius.Core.Scroll.ScrollBarBand.InEdgeZone(
+                    x, y, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top,
+                    BrowserZoneLowerFraction, BrowserZoneRightFraction))
+                ArmBrowserSettlePrime(hwnd, x, y);
+            return;
+        }
+
+        // (3) その他の大窓: 右端/下端のスクロールバー帯なら即温める（窓端にバーがあるアプリ向け）。
+        if (ProbeBusy())
+            return; // 既に検出中（期限内）
         var cand = Clematius.Core.Scroll.ScrollBarBand.EdgeCandidate(
             x, y, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top,
             InputNative.GetSystemMetrics(InputNative.SM_CXVSCROLL),
