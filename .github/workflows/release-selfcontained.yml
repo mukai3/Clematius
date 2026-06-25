@@ -39,7 +39,7 @@ jobs:
         run: |
           # WPF はトリミング非対応のため PublishTrimmed は使わない。
           # 単一 exe にまとめ、WPF のネイティブ依存も自己展開で同梱する。圧縮でサイズを抑える。
-          dotnet publish src/Clemotius/Clemotius.csproj `
+          dotnet publish src/Clematius/Clematius.csproj `
             -c Release -r win-x64 --self-contained true `
             -p:PublishSingleFile=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
@@ -51,8 +51,8 @@ jobs:
         shell: pwsh
         run: |
           # 通常版(release.yml)と同様に zip 圧縮して配布する。単一 exe を zip に収める。
-          Compress-Archive -Path publish-sc/Clemotius.exe `
-            -DestinationPath "Clemotius-${{ inputs.tag }}-win-x64-selfcontained.zip"
+          Compress-Archive -Path publish-sc/Clematius.exe `
+            -DestinationPath "Clematius-${{ inputs.tag }}-win-x64-selfcontained.zip"
 
       - name: Upload to existing Release
         shell: pwsh
@@ -60,4 +60,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ inputs.tag }}" `
-            "Clemotius-${{ inputs.tag }}-win-x64-selfcontained.zip" --clobber
+            "Clematius-${{ inputs.tag }}-win-x64-selfcontained.zip" --clobber

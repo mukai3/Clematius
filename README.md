@@ -1,4 +1,4 @@
-# Clemotius (クレマチウス)
+# Clematius (クレマチウス)
 
 Windows 向けのマウスジェスチャー+αのユーティリティです。更新が終了してしまっている超有名マウスジェスチャーソフト[^1]にインスパイアされて、Windows 10/11 向けに **.NET (C#) で再実装**した個人用プロジェクトです。
 
@@ -23,17 +23,17 @@ Windows 向けのマウスジェスチャー+αのユーティリティです。
 
 ## インストール / 実行
 
-1. [Releases](https://github.com/mukai3/Clemotius/releases) から `Clemotius-vX.Y.Z-win-x64.zip` をダウンロード。
-2. 任意のフォルダに展開し、`Clemotius.exe` を起動。
+1. [Releases](https://github.com/mukai3/Clematius/releases) から `Clematius-vX.Y.Z-win-x64.zip` をダウンロード。
+2. 任意のフォルダに展開し、`Clematius.exe` を起動。
 3. タスクトレイのアイコンから設定画面を開いて割り当てを編集。
 
-設定は `%APPDATA%\Clemotius\config.json` に保存され、手動編集も即時反映されます（破損時は `.bak` に退避して既定設定で起動）。
+設定は `%APPDATA%\Clematius\config.json` に保存され、手動編集も即時反映されます（破損時は `.bak` に退避して既定設定で起動）。
 
 ## 設定画面
 
 WPF + [WPF-UI](https://github.com/lepoco/wpfui) による Fluent デザインの設定画面（左サイドナビ）。変更は即時適用されます。
 
-![Clemotius 設定画面 - ジェスチャー](assets/screenshots/settings-gesture.png)
+![Clematius 設定画面 - ジェスチャー](assets/screenshots/settings-gesture.png)
 
 | ページ | 内容 |
 |---|---|
@@ -45,29 +45,29 @@ WPF + [WPF-UI](https://github.com/lepoco/wpfui) による Fluent デザインの
 
 「ウィンドウ」ページではタイトルバーや最小化/閉じるボタンへのクリックにアクションを割り当てられます。
 
-![Clemotius 設定画面 - ウィンドウ](assets/screenshots/settings-window.png)
+![Clematius 設定画面 - ウィンドウ](assets/screenshots/settings-window.png)
 
 「詳細」ページでは外観テーマ、ジェスチャー判定のしきい値（距離/タイムアウト/長押し）、軌跡・コマンド表示を設定できます。
 
-![Clemotius 設定画面 - 詳細](assets/screenshots/settings-details.png)
+![Clematius 設定画面 - 詳細](assets/screenshots/settings-details.png)
 
 ## 開発 / ビルド
 
 ```powershell
 # ビルド
-dotnet build Clemotius.slnx -c Release
+dotnet build Clematius.slnx -c Release
 
 # テスト
-dotnet test Clemotius.slnx
+dotnet test Clematius.slnx
 
 # 配布物（フレームワーク依存・単一フォルダ）
-dotnet publish src/Clemotius/Clemotius.csproj -c Release -r win-x64 --self-contained false -o publish
+dotnet publish src/Clematius/Clematius.csproj -c Release -r win-x64 --self-contained false -o publish
 ```
 
 - 構成
-  - `src/Clemotius` — WinForms ホスト常駐 + WPF 設定画面 + 低レベルフック等の副作用層
-  - `src/Clemotius.Core` — Win32 非依存のロジック（設定モデル、ジェスチャー判定、スクロール解決など。ユニットテスト対象）
-  - `tests/Clemotius.Tests` — xUnit テスト
+  - `src/Clematius` — WinForms ホスト常駐 + WPF 設定画面 + 低レベルフック等の副作用層
+  - `src/Clematius.Core` — Win32 非依存のロジック（設定モデル、ジェスチャー判定、スクロール解決など。ユニットテスト対象）
+  - `tests/Clematius.Tests` — xUnit テスト
 - ターゲット: `net10.0-windows`（WPF + WinForms）
 - 入力捕捉は低レベルフック（`WH_MOUSE_LL` / `WH_KEYBOARD_LL`）。DLL インジェクションは行いません。
 

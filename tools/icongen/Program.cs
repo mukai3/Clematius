@@ -1,5 +1,5 @@
 /// <summary>
-/// Clemotius（クレマチス花＝風車モチーフ）アイコン生成ツール。
+/// Clematius（クレマチス花＝風車モチーフ）アイコン生成ツール。
 /// 16/20/24/32/48/256px の多解像度 .ico ファイルを出力する。
 ///
 /// 小サイズ(タスクトレイ)での視認性を最優先に、
@@ -13,10 +13,10 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 
-// 既定の出力先: リポジトリ内 src/Clemotius/clemotius.ico
+// 既定の出力先: リポジトリ内 src/Clematius/clematius.ico
 // (BaseDirectory = tools/icongen/bin/Debug/<tfm>/ なので 5 階層上がリポジトリルート)
 var outputPath = args.Length > 0 ? args[0]
-    : Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "Clemotius", "clemotius.ico");
+    : Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "Clematius", "clematius.ico");
 
 outputPath = Path.GetFullPath(outputPath);
 
@@ -171,7 +171,7 @@ static void SavePreview(int[] sizes, List<Bitmap> bitmaps)
 {
     try
     {
-        string dir = Path.Combine(Path.GetTempPath(), "clemotius-icon-preview");
+        string dir = Path.Combine(Path.GetTempPath(), "clematius-icon-preview");
         Directory.CreateDirectory(dir);
         for (int i = 0; i < sizes.Length; i++)
             bitmaps[i].Save(Path.Combine(dir, $"icon-{sizes[i]}.png"), ImageFormat.Png);

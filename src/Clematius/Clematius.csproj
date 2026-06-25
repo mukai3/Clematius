@@ -1,0 +1,34 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Clematius.Core\Clematius.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>clematius.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- トレイ/グレースケール用にアセンブリへ埋め込む（出力に loose な .ico を置かない）。
+         exe ファイル自体のアイコンは上の ApplicationIcon で別途埋め込まれる。 -->
+    <EmbeddedResource Include="clematius.ico" />
+    <!-- WPF の pack URI で参照するための Resource。タイトルバーは .ico の小フレーム、
+         バージョン情報の大きめ表示は単一解像度の .png（拡大/縮小でぼやけない）を使う。 -->
+    <Resource Include="clematius.ico" />
+    <Resource Include="clematius.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+</Project>
