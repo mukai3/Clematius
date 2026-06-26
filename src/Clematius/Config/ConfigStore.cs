@@ -6,7 +6,8 @@ using Clematius.Core.Config.Json;
 namespace Clematius.Config;
 
 /// <summary>
-/// %APPDATA%\Clematius\config.json の読み書きと監視。
+/// 設定 config.json の読み書きと監視。配置先は <see cref="ConfigLocator"/> が決める
+/// （exe と同じフォルダに config.json があればポータブルモード、無ければ %APPDATA%\Clematius）。
 /// 初回は既定設定を書き出す。手動編集は FileSystemWatcher で検知して即リロードする。
 /// 破損時は壊れたファイルを .bak に退避し、既定設定で起動する（上書きしない）。
 /// </summary>
@@ -14,8 +15,12 @@ internal sealed class ConfigStore : IDisposable
 {
     private readonly string _dir;
     private readonly string _path;
+    private readonly bool _portable;
     private readonly FileSystemWatcher _watcher;
     private readonly System.Windows.Forms.Timer _debounce;
+
+    /// <summary>ポータブルモード（exe と同じフォルダの config.json）で動作しているか。</summary>
+    public bool IsPortable => _portable;
 
     /// <summary>現在の設定。リロードで差し替わる。</summary>
     public ClematiusConfig Current { get; private set; }
@@ -33,11 +38,18 @@ internal sealed class ConfigStore : IDisposable
     public ConfigStore(ISynchronizeInvoke marshal)
     {
         string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        _dir = Path.Combine(appData, "Clematius");
-        _path = Path.Combine(_dir, "config.json");
+        // single-file 発行でも exe の実体パスを返す ProcessPath を使う（無い場合は実行基準ディレクトリ）。
+        string exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? System.AppContext.BaseDirectory;
+        var loc = ConfigLocator.Resolve(
+            exeDir, appData, File.Exists(Path.Combine(exeDir, ConfigLocator.FileName)));
+        _dir = loc.Dir;
+        _path = loc.Path;
+        _portable = loc.Portable;
 
         Directory.CreateDirectory(_dir);
-        MigrateFromLegacyClemoutis(appData);
+        // 旧名 Clemoutis からの移行は %APPDATA% 運用時のみ（ポータブルは持ち運び先の config.json が正）。
+        if (!_portable)
+            MigrateFromLegacyClemoutis(appData);
         Current = LoadOrCreate();
 
         // デバウンスも含めてすべて UI スレッドで処理する
@@ -80,6 +92,18 @@ internal sealed class ConfigStore : IDisposable
             Save(def);
             return def;
         }
+        // ポータブル化のために空（または空白のみ）の config.json を置いた場合は、
+        // 破損扱いにせず既定設定で初期化してそのファイルへ書き戻す。
+        try
+        {
+            if (string.IsNullOrWhiteSpace(File.ReadAllText(_path)))
+            {
+                var def = ClematiusConfig.CreateDefault();
+                Save(def);
+                return def;
+            }
+        }
+        catch (IOException) { }
         return TryLoad(out var cfg, out _) ? cfg! : ClematiusConfig.CreateDefault();
     }
 
