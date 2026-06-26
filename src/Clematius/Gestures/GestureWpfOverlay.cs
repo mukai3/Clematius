@@ -85,13 +85,39 @@ internal sealed class GestureWpfOverlay
 
             _line = new Polyline
             {
-                Stroke = new SolidColorBrush(color),
+                // 単色のベタ塗りを避け、同系色の斜めグラデ＋わずかな半透明で柔らかく見せる。
+                // ブラシは Freeze 済みで描画コストは単色とほぼ変わらない（オブジェクトも増やさない）。
+                Stroke = BuildStrokeBrush(color),
                 StrokeThickness = width,
+                Opacity = 0.9,
                 StrokeLineJoin = PenLineJoin.Round,
                 StrokeStartLineCap = PenLineCap.Round,
                 StrokeEndLineCap = PenLineCap.Round,
             };
             _canvas.Children.Add(_line);
+        }
+
+        // 設定色を基準に「明るめ→元色」の斜めグラデを作る。軌跡の向きに依存しないよう
+        // バウンディングボックス相対の対角線に沿わせる。Freeze して描画スレッドで共有可能にする。
+        private static System.Windows.Media.Brush BuildStrokeBrush(WpfColor color)
+        {
+            var brush = new LinearGradientBrush
+            {
+                StartPoint = new WpfPoint(0, 0),
+                EndPoint = new WpfPoint(1, 1),
+                MappingMode = BrushMappingMode.RelativeToBoundingBox,
+            };
+            brush.GradientStops.Add(new GradientStop(Lighten(color, 0.25), 0.0));
+            brush.GradientStops.Add(new GradientStop(color, 1.0));
+            brush.Freeze();
+            return brush;
+        }
+
+        // 各チャンネルを白方向へ amount(0..1) だけ寄せて明るくする。
+        private static WpfColor Lighten(WpfColor c, double amount)
+        {
+            static byte Mix(byte v, double a) => (byte)Math.Clamp(v + (255 - v) * a, 0, 255);
+            return WpfColor.FromRgb(Mix(c.R, amount), Mix(c.G, amount), Mix(c.B, amount));
         }
 
         protected override void OnSourceInitialized(EventArgs e)
