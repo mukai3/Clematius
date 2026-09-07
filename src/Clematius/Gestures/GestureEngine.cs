@@ -32,8 +32,12 @@ internal sealed class GestureEngine
     private System.Threading.Timer? _timeoutTimer;
     private volatile bool _pending;
     private bool _wheelUsed;
-    // タイムアウト（ストローク開始の猶予）が過ぎたら true。以降ストロークを受け付けず、
-    // 右クリックは右ボタンを離したときに発火する（保持時間に関係なく）。
+    // ストローク（矢印ジェスチャー）の受付を打ち切ったら true。以降ストロークを受け付けない。
+    // 打ち切りの契機は2つ:
+    //   (1) タイムアウト（ストローク開始の猶予切れ）。右クリックは右ボタンを離したときに
+    //       発火する（保持時間に関係なく）。
+    //   (2) 右+ホイールジェスチャーの成立。描きかけのストロークはキャンセルする
+    //       （かざぐるマウス互換。右クリックも再生しない＝_wheelUsed による抑制）。
     private volatile bool _strokeWindowClosed;
     private int _startX;
     private int _startY;
@@ -184,6 +188,7 @@ internal sealed class GestureEngine
 
         GestureAction? action;
         int sx, sy;
+        bool canceledStroke = false;
         lock (_gate)
         {
             if (!_pending)
@@ -191,12 +196,23 @@ internal sealed class GestureEngine
             action = delta > 0 ? _wheelUp : _wheelDown;
             if (action is null)
                 return false; // 割当無し: 通常スクロールとして素通し
-            _wheelUsed = true; // UP 時にメニューを出さない／右クリックを再生しない
+            if (!_wheelUsed)
+            {
+                _wheelUsed = true; // UP 時にメニューを出さない／右クリックを再生しない
+                // かざぐるマウス互換: ホイールジェスチャーが成立した時点で、描きかけの
+                // 矢印ジェスチャーはキャンセルする（右UPで発火させない）。以降の移動でも
+                // ストロークを再開させないため受付窓を閉じる。
+                _strokeWindowClosed = true;
+                _encoder?.Reset();
+                canceledStroke = true;
+            }
             CancelTimeoutLocked();
             sx = _startX;
             sy = _startY;
         }
         ExecuteAsync(action, TargetWindowResolver.Resolve(sx, sy));
+        if (canceledStroke)
+            GestureEnded?.Invoke(); // 軌跡/コマンド表示を片付ける（右UP時の再呼び出しは無害）
         return true; // 通常スクロールを抑制
     }
 
